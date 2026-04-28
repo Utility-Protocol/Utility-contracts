@@ -1913,31 +1913,30 @@ pub struct UtilityContract;
 /// ZK proof verification using native Soroban crypto functions
 /// Issue #281: Migrated from legacy placeholder to proper cryptographic verification
 fn verify_groth16_proof(env: &Env, vk: &Groth16VerificationKey, proof: &Groth16Proof, public_inputs: &Vec<Bytes>) -> bool {
-    // Create verification data using native crypto functions
-    let mut verification_data = Vec::new(&env);
-    
-    // Add domain separator for ZK verification
-    verification_data.push_back(&Bytes::from_slice(&env, b"UTILITY_DRIP_ZK_V1"));
-    
-    // Add verification key components
-    verification_data.push_back(&vk.alpha_g1);
-    verification_data.push_back(&vk.beta_g2);
-    verification_data.push_back(&vk.gamma_g2);
-    verification_data.push_back(&vk.delta_g2);
-    
-    // Add proof components
-    verification_data.push_back(&proof.a);
-    verification_data.push_back(&proof.b);
-    verification_data.push_back(&proof.c);
-    
-    // Add public inputs
+    // Build the hash input by concatenating all components into a single Bytes buffer.
+    // Size is known: domain separator (18) + 4 VK fields + 3 proof fields + variable public inputs.
+    // Using direct Bytes concatenation avoids a heap-allocated Vec<Bytes> intermediary.
+    let mut data = Bytes::from_slice(env, b"UTILITY_DRIP_ZK_V1");
+
+    // Verification key components (fixed, 4 fields)
+    data.append(&vk.alpha_g1);
+    data.append(&vk.beta_g2);
+    data.append(&vk.gamma_g2);
+    data.append(&vk.delta_g2);
+
+    // Proof components (fixed, 3 fields)
+    data.append(&proof.a);
+    data.append(&proof.b);
+    data.append(&proof.c);
+
+    // Public inputs (variable length, appended in order)
     for input in public_inputs.iter() {
-        verification_data.push_back(input);
+        data.append(&input);
     }
-    
+
     // Use native Soroban SHA256 for proof hash verification
-    let proof_hash = env.crypto().sha256(&verification_data.to_xdr(&env));
-    
+    let proof_hash = env.crypto().sha256(&data);
+
     // Verify proof hash is not zero and meets basic validation
     let zero_hash = BytesN::from_array(&[0u8; 32]);
     proof_hash != zero_hash
@@ -1951,16 +1950,16 @@ fn verify_zk_proof(env: &Env, proof_hash: BytesN<32>, challenge_data: &BytesN<32
     if proof_hash == zero_hash {
         return false;
     }
-    
-    // Create verification data with challenge
-    let mut verification_data = Vec::new(&env);
-    verification_data.push_back(&Bytes::from_slice(&env, b"UTILITY_DRIP_ZK_VERIFY"));
-    verification_data.push_back(&proof_hash);
-    verification_data.push_back(&challenge_data);
-    
+
+    // Build hash input by concatenating 3 fixed-size components directly into Bytes.
+    // Avoids a heap-allocated Vec<Bytes> intermediary since the size is always 3 items.
+    let mut data = Bytes::from_slice(env, b"UTILITY_DRIP_ZK_VERIFY");
+    data.append(&Bytes::from_slice(env, &proof_hash.to_array()));
+    data.append(&Bytes::from_slice(env, &challenge_data.to_array()));
+
     // Verify using native crypto
-    let verification_result = env.crypto().sha256(&verification_data.to_xdr(&env));
-    
+    let verification_result = env.crypto().sha256(&data);
+
     // Check that verification result is non-zero
     verification_result != zero_hash
 }
@@ -1968,24 +1967,22 @@ fn verify_zk_proof(env: &Env, proof_hash: BytesN<32>, challenge_data: &BytesN<32
 /// Generate a cryptographic commitment using native Soroban crypto functions
 /// Issue #281: Migrated from legacy simple hash to proper cryptographic commitment
 fn generate_commitment(env: &Env, usage_amount: i128, randomness: BytesN<32>) -> BytesN<32> {
-    // Use proper cryptographic commitment with domain separation
-    let mut commitment_data = Vec::new(&env);
-    
-    // Add domain separator for commitment scheme
-    commitment_data.push_back(&Bytes::from_slice(&env, b"UTILITY_DRIP_COMMITMENT_V1"));
-    
+    // Build commitment input by concatenating 4 fixed-size components directly into Bytes.
+    // Avoids a heap-allocated Vec<Bytes> intermediary since the structure is always 4 items.
+    let mut data = Bytes::from_slice(env, b"UTILITY_DRIP_COMMITMENT_V1");
+
     // Add usage amount with proper encoding
-    commitment_data.push_back(&Bytes::from_slice(&env, &usage_amount.to_be_bytes()));
-    
+    data.append(&Bytes::from_slice(env, &usage_amount.to_be_bytes()));
+
     // Add randomness
-    commitment_data.push_back(&Bytes::from_slice(&env, &randomness.to_array()));
-    
+    data.append(&Bytes::from_slice(env, &randomness.to_array()));
+
     // Add timestamp for additional entropy and replay protection
     let timestamp = env.ledger().timestamp();
-    commitment_data.push_back(&Bytes::from_slice(&env, &timestamp.to_be_bytes()));
-    
+    data.append(&Bytes::from_slice(env, &timestamp.to_be_bytes()));
+
     // Use native Soroban SHA256 for cryptographic commitment
-    env.crypto().sha256(&commitment_data.to_xdr(&env))
+    env.crypto().sha256(&data)
 }
 
 /// Check if a nullifier has been used before
@@ -3991,11 +3988,11 @@ impl UtilityContract {
             panic_with_error!(&env, ContractError::MeterNotFound); // No device bound to meter
         }
         
-        // Create a transfer ID based on device hash and new owner (for uniqueness)
-        let mut transfer_data = Vec::new(&env);
-        transfer_data.push_back(&device_hash);
-        transfer_data.push_back(&new_owner.to_xdr(&env));
-        let transfer_id = env.crypto().sha256(&transfer_data.to_xdr(&env));
+        // Create a transfer ID based on device hash and new owner (for uniqueness).
+        // Concatenate 2 fixed components directly into Bytes — no Vec intermediary needed.
+        let mut transfer_data = Bytes::from_slice(&env, &device_hash.to_array());
+        transfer_data.append(&new_owner.to_xdr(&env));
+        let transfer_id = env.crypto().sha256(&transfer_data);
         
         // Store the pending transfer request
         // Key: (device_hash, new_owner) -> current_owner (waiting for confirmation)
@@ -4052,11 +4049,11 @@ impl UtilityContract {
         // The transfer_id should be derivable from device_hash + new_owner
         // Let's verify that the provided transfer_id matches what we expect
         
-        // Recreate expected transfer ID from device hash and new owner
-        let mut expected_transfer_data = Vec::new(&env);
-        expected_transfer_data.push_back(&device_hash);
-        expected_transfer_data.push_back(&new_owner.to_xdr(&env));
-        let expected_transfer_id = env.crypto().sha256(&expected_transfer_data.to_xdr(&env));
+        // Recreate expected transfer ID from device hash and new owner.
+        // Concatenate 2 fixed components directly into Bytes — no Vec intermediary needed.
+        let mut expected_transfer_data = Bytes::from_slice(&env, &device_hash.to_array());
+        expected_transfer_data.append(&new_owner.to_xdr(&env));
+        let expected_transfer_id = env.crypto().sha256(&expected_transfer_data);
         
         if transfer_id != expected_transfer_id {
             panic_with_error!(&env, ContractError::InvalidUsageValue); // Invalid transfer ID

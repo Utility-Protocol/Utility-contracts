@@ -138,12 +138,14 @@ pub mod nonce_sync_fuzz_tests {
         let authorized_resetter2 = TestAddress::random(&env);
         let authorized_resetter3 = TestAddress::random(&env);
 
-        // Setup authorized resetters
+        // Setup authorized resetters — 3 fixed items, use vec! macro for clarity
         let resetters_key = DataKey::AuthorizedNonceResetters;
-        let mut resetters = Vec::new(&env);
-        resetters.push_back(authorized_resetter1.clone());
-        resetters.push_back(authorized_resetter2.clone());
-        resetters.push_back(authorized_resetter3.clone());
+        let resetters = soroban_sdk::vec![
+            &env,
+            authorized_resetter1.clone(),
+            authorized_resetter2.clone(),
+            authorized_resetter3.clone()
+        ];
         env.storage().persistent().set(&resetters_key, &resetters);
 
         // Initialize device with compromised nonce

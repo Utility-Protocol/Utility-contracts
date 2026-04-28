@@ -300,32 +300,34 @@ fn test_reliability_score_reset_impact() {
     let client = UtilityContractClient::new(&env, &contract_id);
     let provider = Address::generate(&env);
 
-    // Create meter info vector
-    let mut meter_infos = Vec::new(&env);
-    meter_infos.push_back(MeterInfo {
-        user: user1.clone(),
-        provider: provider.clone(),
-        off_peak_rate: 100,
-        token: token_address.clone(),
-        billing_type: BillingType::PrePaid,
-        device_public_key: device_key1,
-    });
-    meter_infos.push_back(MeterInfo {
-        user: user2.clone(),
-        provider: provider.clone(),
-        off_peak_rate: 200,
-        token: token_address.clone(),
-        billing_type: BillingType::PostPaid,
-        device_public_key: device_key2,
-    });
-    meter_infos.push_back(MeterInfo {
-        user: user3.clone(),
-        provider: provider.clone(),
-        off_peak_rate: 150,
-        token: token_address.clone(),
-        billing_type: BillingType::PrePaid,
-        device_public_key: device_key3,
-    });
+    // 3 fixed meter infos — use vec! macro to avoid repeated push_back calls
+    let meter_infos = soroban_sdk::vec![
+        &env,
+        MeterInfo {
+            user: user1.clone(),
+            provider: provider.clone(),
+            off_peak_rate: 100,
+            token: token_address.clone(),
+            billing_type: BillingType::PrePaid,
+            device_public_key: device_key1,
+        },
+        MeterInfo {
+            user: user2.clone(),
+            provider: provider.clone(),
+            off_peak_rate: 200,
+            token: token_address.clone(),
+            billing_type: BillingType::PostPaid,
+            device_public_key: device_key2,
+        },
+        MeterInfo {
+            user: user3.clone(),
+            provider: provider.clone(),
+            off_peak_rate: 150,
+            token: token_address.clone(),
+            billing_type: BillingType::PrePaid,
+            device_public_key: device_key3,
+        },
+    ];
 
     // Call batch_register_meters
     let batch_event = client.batch_register_meters(&meter_infos);

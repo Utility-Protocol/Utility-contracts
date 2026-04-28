@@ -26,7 +26,7 @@
 
 use soroban_sdk::{
     contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
-    Address, BytesN, Env, Symbol, Vec,
+    Address, Bytes, BytesN, Env, Symbol, Vec,
 };
 
 use crate::{ContractError, DataKey};
@@ -749,20 +749,20 @@ impl NonceSyncManager {
     /// Verify heartbeat signature using native Soroban crypto functions
     /// Issue #281: Migrated from legacy placeholder to proper cryptographic verification
     fn verify_heartbeat_signature(env: &Env, heartbeat: &SignedHeartbeat) -> bool {
-        // Create message that was signed
-        let mut message_data = Vec::new(env);
-        message_data.push_back(&Bytes::from_slice(env, b"UTILITY_DRIP_HEARTBEAT_V1"));
-        message_data.push_back(&Bytes::from_slice(env, &heartbeat.meter_id.to_be_bytes()));
-        message_data.push_back(&heartbeat.device_mac);
-        message_data.push_back(&Bytes::from_slice(env, &heartbeat.nonce.to_be_bytes()));
-        message_data.push_back(&Bytes::from_slice(env, &heartbeat.timestamp.to_be_bytes()));
+        // Build the signed message by concatenating 5 fixed-size components directly into Bytes.
+        // Avoids a heap-allocated Vec<Bytes> intermediary since the structure is always 5 items.
+        let mut message_data = Bytes::from_slice(env, b"UTILITY_DRIP_HEARTBEAT_V1");
+        message_data.append(&Bytes::from_slice(env, &heartbeat.meter_id.to_be_bytes()));
+        message_data.append(&Bytes::from_slice(env, &heartbeat.device_mac.to_array()));
+        message_data.append(&Bytes::from_slice(env, &heartbeat.nonce.to_be_bytes()));
+        message_data.append(&Bytes::from_slice(env, &heartbeat.timestamp.to_be_bytes()));
         
         // Use native Soroban Ed25519 signature verification
         #[cfg(not(test))]
         {
             env.crypto().ed25519_verify(
                 &heartbeat.public_key,
-                &message_data.to_xdr(env),
+                &message_data,
                 &heartbeat.signature,
             )
         }

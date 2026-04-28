@@ -945,6 +945,7 @@ impl TariffOracle {
     /// Get default tariff schedule
     fn get_default_schedule() -> DailyTariffSchedule {
         let env = Env::new();
+        // HOURS_IN_DAY (24) items — size is known at compile time
         let mut hourly_rates = Vec::new(&env);
         
         // Create a simple default schedule

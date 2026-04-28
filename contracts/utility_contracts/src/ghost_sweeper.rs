@@ -443,6 +443,7 @@ impl GhostSweeper {
 
     /// Get all stream IDs (simplified implementation)
     fn get_all_stream_ids(env: &Env, limit: u32) -> Vec<u64> {
+        // Size is exactly `limit` — known before the loop begins
         let mut stream_ids = Vec::new(env);
         
         // This is a placeholder - in production, you would have an index

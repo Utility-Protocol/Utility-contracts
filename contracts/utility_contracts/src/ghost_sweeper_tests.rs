@@ -116,14 +116,12 @@ pub mod ghost_sweeper_tests {
         let payer = TestAddress::random(&env);
         let relayer = TestAddress::random(&env);
 
-        // Create multiple ghost streams
-        let mut stream_ids = Vec::new(&env);
-        for i in 1..=5 {
-            let stream_id = i;
+        // Create multiple ghost streams — 5 fixed IDs, pre-built with vec! macro
+        let stream_ids = soroban_sdk::vec![&env, 1u64, 2u64, 3u64, 4u64, 5u64];
+        for stream_id in stream_ids.iter() {
             let ghost_stream = create_ghost_stream(&env, stream_id, provider.clone(), payer.clone());
             let stream_key = DataKey::ContinuousFlow(stream_id);
             env.storage().persistent().set(&stream_key, &ghost_stream);
-            stream_ids.push_back(stream_id);
         }
 
         // Batch prune

@@ -28,10 +28,12 @@ fn test_zk_privacy_flow() {
         gamma_g2: Bytes::from_slice(&env, &[0u8; 128]),
         delta_g2: Bytes::from_slice(&env, &[0u8; 128]),
         ic: {
-            let mut ic = Vec::new(&env);
-            ic.push_back(Bytes::from_slice(&env, &[0u8; 64])); // IC[0]
-            ic.push_back(Bytes::from_slice(&env, &[0u8; 64])); // IC[1] (for amount)
-            ic
+            // 2 fixed IC points — use vec! macro to avoid push_back overhead
+            soroban_sdk::vec![
+                &env,
+                Bytes::from_slice(&env, &[0u8; 64]), // IC[0]
+                Bytes::from_slice(&env, &[0u8; 64]), // IC[1] (for amount)
+            ]
         },
     };
     client.set_zk_verification_key(&meter_id, &vk);
@@ -51,8 +53,8 @@ fn test_zk_privacy_flow() {
     amount_arr[15] = 10;
     let amount_bytes = Bytes::from_slice(&env, &amount_arr);
 
-    let mut public_inputs = Vec::new(&env);
-    public_inputs.push_back(amount_bytes);
+    // 1 fixed public input — use vec! macro to avoid push_back overhead
+    let public_inputs = soroban_sdk::vec![&env, amount_bytes];
 
     let nullifier = BytesN::from_array(&env, &[2u8; 32]);
 

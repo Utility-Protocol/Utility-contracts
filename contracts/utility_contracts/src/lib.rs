@@ -709,6 +709,69 @@ pub struct AdminTransferProposal {
     pub is_active: bool,
 }
 
+// ============================================================
+// Upgrade Multi-Sig Structures
+// ============================================================
+
+/// Configuration for the upgrade multi-sig committee.
+/// Stores the set of authorized upgrade signers and the approval threshold.
+#[contracttype]
+#[derive(Clone)]
+pub struct UpgradeMultiSigConfig {
+    /// Addresses authorized to propose and approve WASM upgrades (2–7 signers).
+    pub signers: Vec<Address>,
+    /// Minimum number of approvals required before an upgrade can execute.
+    pub required_approvals: u32,
+    /// Seconds that must elapse after threshold is reached before execution is allowed.
+    pub timelock_seconds: u64,
+    /// Seconds after proposal creation before the proposal expires if not executed.
+    pub expiry_seconds: u64,
+    /// Timestamp when this config was last updated.
+    pub updated_at: u64,
+}
+
+/// Status of an upgrade proposal.
+#[contracttype]
+#[derive(Clone, PartialEq)]
+pub enum UpgradeProposalStatus {
+    Pending,
+    Approved,   // threshold reached, waiting for timelock
+    Executed,
+    Cancelled,
+    Expired,
+}
+
+/// A versioned upgrade proposal that requires multi-sig approval.
+#[contracttype]
+#[derive(Clone)]
+pub struct UpgradeProposalV2 {
+    /// Unique sequential proposal ID.
+    pub proposal_id: u64,
+    /// The new WASM hash to upgrade to.
+    pub new_wasm_hash: BytesN<32>,
+    /// Address that submitted this proposal.
+    pub proposer: Address,
+    /// Ledger timestamp when the proposal was created.
+    pub proposed_at: u64,
+    /// Ledger timestamp after which the proposal expires if not executed.
+    pub expires_at: u64,
+    /// Ledger timestamp when the approval threshold was first reached (0 = not yet reached).
+    pub threshold_reached_at: u64,
+    /// Earliest timestamp at which execution is allowed (proposed_at + timelock, set when threshold reached).
+    pub earliest_execution_at: u64,
+    /// Current number of approvals (including the proposer's implicit approval).
+    pub approval_count: u32,
+    /// Current status of this proposal.
+    pub status: UpgradeProposalStatus,
+}
+
+// Upgrade multi-sig constants
+const MIN_UPGRADE_SIGNERS: u32 = 2;
+const MAX_UPGRADE_SIGNERS: u32 = 7;
+const MIN_UPGRADE_TIMELOCK_SECONDS: u64 = 24 * 60 * 60;   // 24 hours minimum timelock
+const DEFAULT_UPGRADE_TIMELOCK_SECONDS: u64 = 48 * 60 * 60; // 48 hours default
+const DEFAULT_UPGRADE_EXPIRY_SECONDS: u64 = 14 * 24 * 60 * 60; // 14 days to execute
+
 #[contracttype]
 #[derive(Clone)]
 pub struct LegalFreeze {
@@ -944,6 +1007,12 @@ pub enum DataKey {
     EmergencyDrainLastExecution,
     EmergencyDrainRecord(u64),
     EmergencyDrainCounter,
+    // Upgrade Multi-Sig
+    UpgradeMultiSigConfig,
+    UpgradeProposalV2(u64),
+    UpgradeApproval(u64, Address),
+    UpgradeProposalCounter,
+    ActiveUpgradeProposalId,
 }
 
 #[contracterror(export = false)]
@@ -1058,6 +1127,18 @@ pub enum ContractError {
     InvalidFeeAmount = 95,
     ExcessiveFee = 96,
     RateLimitExceeded = 97,
+    // Upgrade Multi-Sig errors
+    UpgradeMultiSigNotConfigured = 98,
+    UpgradeMultiSigAlreadyConfigured = 99,
+    UpgradeProposalNotFound = 100,
+    UpgradeAlreadyApproved = 101,
+    UpgradeApprovalNotFound = 102,
+    UpgradeTimelockActive = 103,
+    UpgradeAlreadyExecuted = 104,
+    UpgradeAlreadyCancelled = 105,
+    UpgradeProposalExpired = 106,
+    NotAuthorizedUpgradeSigner = 107,
+    InsufficientUpgradeApprovals = 108,
 }
 
 #[contracttype]
@@ -5798,8 +5879,9 @@ impl UtilityContract {
             .get(&DataKey::ProposedUpgrade)
             .expect("No upgrade proposal found");
 
-        // In a real implementation, this would call env.deployer().update_current_contract_wasm()
-        // For now, we just emit an event indicating the upgrade is ready
+        // Execute the WASM upgrade on-chain
+        env.deployer().update_current_contract_wasm(proposal.new_wasm_hash.clone());
+
         env.events().publish(
             (soroban_sdk::symbol_short!("UpgrdFin"),),
             proposal.new_wasm_hash,
@@ -5814,8 +5896,6 @@ impl UtilityContract {
     // ============================================================
     // NEW TASKS IMPLEMENTATION
     // ============================================================
-
-    // ==================== TASK #1: ADMIN TRANSFER WITH TIMELOCK ====================
 
     /// Initialize admin transfer with 48-hour timelock
     /// During the window, active users can veto (requires 10% to succeed)

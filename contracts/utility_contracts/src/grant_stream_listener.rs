@@ -1,8 +1,9 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
+    contract, contracterror, contractimpl, contracttype, panic_with_error,
     symbol_short, token, Address, Env, String, Symbol, Vec, BytesN,
 };
+use super::secure_call_interface::{SecureCallManager, SecureCallError};
 
 // --- Grant Stream Listener Contract ---
 // This contract listens for GoalReached events from Utility Drips and processes grant matches
@@ -53,10 +54,6 @@ pub enum GrantError {
     Unauthorized = 7,
 }
 
-#[contractclient(name = "UtilityDripClient")]
-pub trait UtilityDrip {
-    fn get_conservation_goal(env: Env, goal_id: u64) -> super::ConservationGoal;
-}
 
 #[contract]
 pub struct GrantStreamListener;
@@ -87,7 +84,7 @@ impl GrantStreamListener {
     }
 
     /// Called by Utility Drips when a conservation goal is reached
-    pub fn on_goal_reached(env: Env, goal_event: super::GoalReachedEvent) {
+    pub fn on_goal_reached(env: Env, utility_drip_contract: Address, goal_event: super::GoalReachedEvent) {
         let config: GrantConfig = env.storage()
             .instance()
             .get(&GrantDataKey::GrantConfig)
@@ -101,6 +98,30 @@ impl GrantStreamListener {
         if let Some(existing_match) = env.storage().instance().get::<_, GrantMatch>(&GrantDataKey::GrantMatch(goal_event.goal_id)) {
             if existing_match.processed {
                 panic_with_error!(&env, GrantError::GrantAlreadyProcessed);
+            }
+        }
+
+        // Verify the goal event by calling back to the utility drip contract using secure interface
+        let mut args = Vec::new(&env);
+        args.push_back(goal_event.goal_id.into());
+        
+        match SecureCallManager::secure_call::<super::ConservationGoal>(
+            &env,
+            &utility_drip_contract,
+            &Symbol::new(&env, "get_conservation_goal"),
+            args,
+            Some(20_000_000), // Conservative gas limit for goal verification
+        ) {
+            Ok(conservation_goal) => {
+                // Verify the goal event matches the stored goal
+                if conservation_goal.provider != goal_event.provider ||
+                   conservation_goal.target_water_savings != goal_event.water_savings ||
+                   !conservation_goal.is_active {
+                    panic_with_error!(&env, GrantError::GrantNotFound);
+                }
+            }
+            Err(_) => {
+                panic_with_error!(&env, GrantError::GrantNotFound);
             }
         }
 

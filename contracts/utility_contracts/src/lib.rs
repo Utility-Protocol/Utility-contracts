@@ -70,6 +70,15 @@ pub struct PriceData {
 pub enum BillingType { PrePaid, PostPaid }
 
 #[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum VerificationMethod {
+    IdentityVerified,
+    CommunityApproved,
+    GovernmentIssued,
+    StakingBased,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub struct UsageData {
     pub total_watt_hours: i128,
@@ -87,6 +96,11 @@ mod gas_estimator;
 use gas_estimator::GasCostEstimator;
 
 pub mod grant_stream_listener;
+pub mod secure_call_interface;
+use secure_call_interface::{SecureCallManager, SecureCallError};
+
+#[cfg(test)]
+mod secure_call_tests;
 #[contracttype]
 #[derive(Clone)]
 pub struct Meter {
@@ -856,6 +870,11 @@ fn update_provider_total_pool(env: &Env, provider: &Address, old: i128, new: i12
     // Pool update logic
 }
 
+fn refresh_activity(meter: &mut Meter, now: u64) {
+    meter.is_active = provider_meter_value(meter) > 0;
+    meter.last_update = now;
+}
+
 fn publish_inactive_event(env: &Env, meter_id: u64, now: u64) {
     env.events()
         .publish((symbol_short!("Inactive"), meter_id), now);
@@ -1053,10 +1072,30 @@ impl UtilityContract {
                 (goal.provider.clone(), goal.current_savings, goal.grant_amount),
             );
 
-            // Notify Grant Stream contract if configured
+            // Notify Grant Stream contract if configured using secure interface
             if let Some(grant_stream_address) = env.storage().instance().get::<_, Address>(&DataKey::GrantStreamMatch(goal_id, goal.provider.clone())) {
-                let grant_stream_client = GrantStreamClient::new(&env, &grant_stream_address);
-                grant_stream_client.on_goal_reached(goal_event);
+                let mut args = Vec::new(&env);
+                args.push_back(env.current_contract_address().into());
+                args.push_back(goal_event.into());
+                
+                match SecureCallManager::secure_call::<()>(
+                    &env,
+                    &grant_stream_address,
+                    &Symbol::new(&env, "on_goal_reached"),
+                    args,
+                    Some(30_000_000), // Conservative gas limit for grant processing
+                ) {
+                    Ok(_) => {
+                        // Grant processed successfully
+                    }
+                    Err(e) => {
+                        // Log error but don't panic - grant processing failure shouldn't stop goal achievement
+                        env.events().publish(
+                            (symbol_short!("GrantErr"), goal_id),
+                            (grant_stream_address, e as u32),
+                        );
+                    }
+                }
             }
         }
 
@@ -1133,10 +1172,30 @@ impl UtilityContract {
                 (goal.provider.clone(), goal.current_savings, goal.grant_amount),
             );
 
-            // Notify Grant Stream contract if configured
+            // Notify Grant Stream contract if configured using secure interface
             if let Some(grant_stream_address) = env.storage().instance().get::<_, Address>(&DataKey::GrantStreamMatch(goal_id, goal.provider.clone())) {
-                let grant_stream_client = GrantStreamClient::new(&env, &grant_stream_address);
-                grant_stream_client.on_goal_reached(goal_event);
+                let mut args = Vec::new(&env);
+                args.push_back(env.current_contract_address().into());
+                args.push_back(goal_event.into());
+                
+                match SecureCallManager::secure_call::<()>(
+                    &env,
+                    &grant_stream_address,
+                    &Symbol::new(&env, "on_goal_reached"),
+                    args,
+                    Some(30_000_000), // Conservative gas limit for grant processing
+                ) {
+                    Ok(_) => {
+                        // Grant processed successfully
+                    }
+                    Err(e) => {
+                        // Log error but don't panic - grant processing failure shouldn't stop goal achievement
+                        env.events().publish(
+                            (symbol_short!("GrantErr"), goal_id),
+                            (grant_stream_address, e as u32),
+                        );
+                    }
+                }
             }
 
             env.storage().instance().set(&DataKey::ConservationGoal(goal_id), &updated_goal);
@@ -3762,18 +3821,26 @@ let milestone = MaintenanceMilestone {
             panic_with_error!(&env, ContractError::AmountBelowMultiSigThreshold);
         }
 
-        // Find the proposer from authorized finance wallets
+        // Find the proposer from authorized finance wallets using secure call interface
         let mut proposer: Option<Address> = None;
         for i in 0..config.finance_wallets.len() {
             let wallet = config.finance_wallets.get(i).unwrap();
-            // Try to require auth from each wallet - the one that authorized is the proposer
-            if env.try_invoke_contract::<(), _>(
+            // Try to require auth from each wallet using secure call interface
+            match SecureCallManager::secure_call::<()>(
+                &env,
                 &wallet,
                 &Symbol::new(&env, "require_auth"),
-                (),
-            ).is_ok() {
-                proposer = Some(wallet);
-                break;
+                Vec::new(&env),
+                Some(10_000_000), // Conservative gas limit for auth check
+            ) {
+                Ok(_) => {
+                    proposer = Some(wallet);
+                    break;
+                }
+                Err(_) => {
+                    // Continue to next wallet
+                    continue;
+                }
             }
         }
 
@@ -4108,12 +4175,17 @@ let milestone = MaintenanceMilestone {
         }
 
         // Either provider or proposer can cancel
-        // Try provider first
-        let is_provider = env.try_invoke_contract::<(), _>(
+        // Try provider first using secure call interface
+        let is_provider = match SecureCallManager::secure_call::<()>(
+            &env,
             &provider,
             &Symbol::new(&env, "require_auth"),
-            (),
-        ).is_ok();
+            Vec::new(&env),
+            Some(10_000_000), // Conservative gas limit for auth check
+        ) {
+            Ok(_) => true,
+            Err(_) => false,
+        };
 
         if !is_provider {
             // Try proposer

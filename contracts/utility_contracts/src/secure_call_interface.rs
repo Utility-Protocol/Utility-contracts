@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error,
-    symbol_short, Address, Env, Symbol, Vec, BytesN, Status, Val,
+    symbol_short, Address, Env, Symbol, Vec, BytesN, Val,
 };
 
 /// Maximum gas limit for cross-contract calls to prevent gas exhaustion
@@ -30,9 +30,9 @@ pub struct ContractCallConfig {
 
 #[contracttype]
 #[derive(Clone)]
-pub struct CallResult<T> {
+pub struct CallResult {
     pub success: bool,
-    pub data: T,
+    pub data: Val,
     pub gas_used: u64,
     pub error_code: Option<u32>,
 }
@@ -67,7 +67,7 @@ pub trait SecureCallInterface {
         function: &Symbol,
         args: Vec<Val>,
         gas_limit: Option<u64>,
-    ) -> Result<CallResult<T>, SecureCallError>;
+    ) -> Result<CallResult, SecureCallError>;
 
     /// Register a contract for secure calls
     fn register_contract(
@@ -105,6 +105,7 @@ pub trait SecureCallInterface {
 }
 
 /// Implementation of the secure call interface
+#[contract]
 pub struct SecureCallManager;
 
 #[contractimpl]
@@ -131,19 +132,19 @@ impl SecureCallManager {
         env.storage().instance().set(&SecureCallDataKey::LastCallReset, &env.ledger().timestamp());
 
         env.events().publish(
-            (symbol_short!("SecureInit"),),
+            (symbol_short!("SInit"),),
             admin,
         );
     }
 
     /// Execute a secure cross-contract call with comprehensive security checks
-    pub fn secure_call<T>(
+    pub fn secure_call(
         env: &Env,
         target_contract: &Address,
         function: &Symbol,
         args: Vec<Val>,
         gas_limit: Option<u64>,
-    ) -> Result<CallResult<T>, SecureCallError> {
+    ) -> Result<CallResult, SecureCallError> {
         // Check call depth to prevent reentrancy
         let current_depth: u8 = env.storage().instance().get(&SecureCallDataKey::CallDepth).unwrap_or(0);
         if current_depth >= MAX_CALL_DEPTH {
@@ -173,7 +174,7 @@ impl SecureCallManager {
         env.storage().instance().set(&SecureCallDataKey::CallDepth, &(current_depth + 1));
 
         // Execute the contract call with gas limit
-        let call_result = env.try_invoke_contract::<T, _>(
+        let call_result = env.try_invoke_contract::<_, _>(
             target_contract,
             function,
             args,
@@ -184,8 +185,6 @@ impl SecureCallManager {
 
         match call_result {
             Ok(result) => {
-                // Validate return value (basic type checking)
-                // In a full implementation, you'd add more sophisticated validation
                 Ok(CallResult {
                     success: true,
                     data: result,
@@ -226,7 +225,7 @@ impl SecureCallManager {
         env.storage().instance().set(&SecureCallDataKey::ContractConfig(contract_address.clone()), &config);
 
         env.events().publish(
-            (symbol_short!("ContractReg"),),
+            (symbol_short!("CReg"),),
             contract_address,
         );
     }
@@ -242,7 +241,7 @@ impl SecureCallManager {
         env.storage().instance().remove(&SecureCallDataKey::ContractConfig(contract_address));
 
         env.events().publish(
-            (symbol_short!("ContractUnreg"),),
+            (symbol_short!("CUnreg"),),
             contract_address,
         );
     }
@@ -282,7 +281,7 @@ impl SecureCallManager {
         env.storage().instance().set(&SecureCallDataKey::ContractConfig(contract_address), &config);
 
         env.events().publish(
-            (symbol_short!("ContractCfgUp"),),
+            (symbol_short!("CCfgUp"),),
             contract_address,
         );
     }
@@ -312,7 +311,7 @@ impl SecureCallManager {
         // Disable all contracts by setting a global flag (simplified approach)
         // In a full implementation, you'd iterate through all registered contracts
         env.events().publish(
-            (symbol_short!("EmergencyOff"),),
+            (symbol_short!("EOff"),),
             env.ledger().timestamp(),
         );
     }
@@ -326,7 +325,7 @@ impl SecureCallManager {
         }
 
         env.events().publish(
-            (symbol_short!("EmergencyOn"),),
+            (symbol_short!("EOn"),),
             env.ledger().timestamp(),
         );
     }

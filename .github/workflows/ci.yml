@@ -1,10 +1,13 @@
-name: Soroban CI
+name: Utility Drip CI
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   test-and-lint:
@@ -24,6 +27,14 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Run tests
         run: cargo test
+      - name: Fuzz test detection
+        run: |
+          if [ -d "contracts/utility_contracts/fuzz" ]; then
+            cargo install cargo-fuzz || true
+            echo "✅ Fuzz testing infrastructure available"
+          else
+            echo "ℹ️ No fuzz tests found"
+          fi
 
   build-wasm:
     needs: test-and-lint

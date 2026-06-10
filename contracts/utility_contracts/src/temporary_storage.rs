@@ -4,7 +4,7 @@
 //! by using Soroban's temporary storage for frequently updated data that
 //! doesn't need to persist across contract invocations.
 
-use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Env, Symbol, TryFromVal, Val, Vec};
 use crate::{
     ContinuousFlow, DataKey, Meter, ProviderWithdrawalWindow, 
     DustAggregation, SLAState, StreamingFeeAccrued
@@ -181,7 +181,7 @@ impl TempStorageManager {
     }
     
     /// Store batch operation data
-    pub fn store_batch_data<T: contracttype::ContractType>(env: &Env, operation: Symbol, data: &T) {
+    pub fn store_batch_data(env: &Env, operation: Symbol, data: &soroban_sdk::Val) {
         env.storage().temporary().set(
             &TempStorageKey::BatchOperation(operation), 
             data, 
@@ -190,7 +190,7 @@ impl TempStorageManager {
     }
     
     /// Get batch operation data
-    pub fn get_batch_data<T: contracttype::ContractType>(env: &Env, operation: Symbol) -> Option<T> {
+    pub fn get_batch_data<T: TryFromVal<Env, Val>>(env: &Env, operation: Symbol) -> Option<T> {
         env.storage().temporary().get(&TempStorageKey::BatchOperation(operation))
     }
     

@@ -40,7 +40,7 @@
 //! This module implements Issue #261: Ledger-Native "Utility-Tariff" Price Oracle
 
 use soroban_sdk::{
-    contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
     Address, Env, Symbol, Vec,
 };
 
@@ -147,7 +147,7 @@ pub struct TariffWindowTransition {
     ///
     /// This should correspond to the hour boundary where the new
     /// tariff rate becomes effective.
-    pub hour: u8,
+    pub hour: u32,
     
     /// Previous rate per second being replaced.
     ///
@@ -256,7 +256,7 @@ pub struct HourlyTariff {
     ///
     /// Must be a valid hour within the 24-hour day.
     /// Each hour can have different pricing based on demand patterns.
-    pub hour: u8,
+    pub hour: u32,
     
     /// Rate in cents per kilowatt-hour (kWh).
     ///
@@ -268,13 +268,13 @@ pub struct HourlyTariff {
     /// Tariff tier classification for this hour.
     ///
     /// Determines the pricing category and helps with
-    ** consumer understanding and demand response programs.
+    // consumer understanding and demand response programs.
     pub tier: TariffTier,
     
     /// Whether this hour has high renewable energy availability.
     ///
     /// Renewable hours typically have lower rates to encourage
-    ** consumption when clean energy is abundant.
+    // consumption when clean energy is abundant.
     pub is_renewable_hour: bool,
 }
 
@@ -324,25 +324,25 @@ pub struct DailyTariffSchedule {
     /// Grid administrator who authorized this schedule.
     ///
     /// The address of the authorized administrator who signed
-    ** this schedule. Used for audit and verification purposes.
+    // this schedule. Used for audit and verification purposes.
     pub signed_by: Address,
     
     /// When this schedule was created (Unix timestamp).
     ///
     /// Used for audit trail and to verify notice periods
-    ** were respected before activation.
+    // were respected before activation.
     pub created_at: u64,
     
     /// When this schedule becomes effective (Unix timestamp).
     ///
     /// Must be at least 24 hours after creation to respect
-    ** the consumer protection notice period.
+    // the consumer protection notice period.
     pub effective_at: u64,
     
     /// Cryptographic signature of the grid administrator.
     ///
     /// Ed25519 signature proving the administrator authorized
-    ** this schedule. Prevents unauthorized tariff changes.
+    // this schedule. Prevents unauthorized tariff changes.
     pub admin_signature: soroban_sdk::BytesN<64>,
 }
 
@@ -478,7 +478,7 @@ pub struct FlowCalculationResult {
     ///
     /// Count of distinct hourly tariff windows included in the calculation.
     /// Useful for understanding rate complexity.
-    pub windows_crossed: u8,
+    pub windows_crossed: u32,
 }
 
 /// Main contract implementation for the Ledger-Native Utility-Tariff Price Oracle.
@@ -581,7 +581,7 @@ impl TariffOracle {
             .set(&DataKey::TodayTariffSchedule, &initial_schedule);
 
         env.events().publish(
-            (symbol_short!("TariffOracleInitialized"),),
+            (symbol_short!("TOInit"),),
             (grid_admin, initial_schedule.schedule_date),
         );
     }
@@ -650,7 +650,7 @@ impl TariffOracle {
             .set(&DataKey::TariffProposalCounter, &next_proposal_id);
 
         env.events().publish(
-            (symbol_short!("TariffUpdateProposed"),),
+            (symbol_short!("TUpdProp"),),
             (next_proposal_id, proposal.executable_at),
         );
 
@@ -721,7 +721,7 @@ impl TariffOracle {
 
         // Emit transition event
         env.events().publish(
-            (symbol_short!("TariffScheduleUpdated"),),
+            (symbol_short!("TSchdUpd"),),
             (proposal_id, proposal.new_schedule.schedule_date),
         );
     }
@@ -730,17 +730,17 @@ impl TariffOracle {
     /// 
     /// # Arguments
     /// * `env` - The contract environment
-    /// * `consumption_rate_kwh_per_second` - Device consumption rate
+    /// * `consumption_rate` - Device consumption rate
     /// 
     /// # Returns
     /// Current tokens per second based on tariff
-    pub fn calculate_current_flow_rate(env: Env, consumption_rate_kwh_per_second: i128) -> i128 {
+    pub fn calculate_current_flow_rate(env: Env, consumption_rate: i128) -> i128 {
         let current_hour = Self::get_current_hour(&env);
         let tariff = Self::get_current_tariff(env.clone(), current_hour);
         
         // Convert cents per kWh to tokens per second
-        // rate_per_second = consumption_rate_kwh_per_second * tariff.rate_cents_per_kwh
-        tariff.rate_cents_per_kwh.saturating_mul(consumption_rate_kwh_per_second)
+        // rate_per_second = consumption_rate * tariff.rate_cents_per_kwh
+        tariff.rate_cents_per_kwh.saturating_mul(consumption_rate)
     }
 
     /// Calculate flow for a time period that may span multiple tariff windows
@@ -749,7 +749,7 @@ impl TariffOracle {
     /// * `env` - The contract environment
     /// * `start_timestamp` - Start time of the period
     /// * `end_timestamp` - End time of the period
-    /// * `consumption_rate_kwh_per_second` - Constant consumption rate
+    /// * `consumption_rate` - Constant consumption rate
     /// 
     /// # Returns
     /// Flow calculation result with blended rates
@@ -757,7 +757,7 @@ impl TariffOracle {
         env: Env,
         start_timestamp: u64,
         end_timestamp: u64,
-        consumption_rate_kwh_per_second: i128,
+        consumption_rate: i128,
     ) -> FlowCalculationResult {
         if end_timestamp <= start_timestamp {
             panic!("Invalid time period");
@@ -782,7 +782,7 @@ impl TariffOracle {
             };
             
             let period_duration = period_end - current_time;
-            let period_tokens = consumption_rate_kwh_per_second
+            let period_tokens = consumption_rate
                 .saturating_mul(tariff.rate_cents_per_kwh)
                 .saturating_mul(period_duration as i128);
             

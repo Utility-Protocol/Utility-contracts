@@ -1,7 +1,11 @@
 #![cfg(test)]
 
+extern crate std;
+
 use crate::*;
 use soroban_sdk::{symbol_short, Address, Env, BytesN};
+use std::vec;
+use std::format;
 
 #[test]
 fn test_dust_detection() {

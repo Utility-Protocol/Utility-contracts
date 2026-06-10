@@ -8,9 +8,10 @@
 /// 2. Batch operation profiling
 /// 3. Comparative benchmarking
 /// 4. Regression detection
-/// 5. Contract operation gas tracking
 
 #![cfg(test)]
+
+extern crate std;
 
 use crate::gas_metrics::*;
 use std::collections::BTreeMap;

@@ -1,10 +1,12 @@
 #![cfg(test)]
 
+extern crate std;
+
 use soroban_sdk::testutils::{Address as TestAddress, Ledger as TestLedger};
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 use crate::{
     BufferDepletedEvent, BufferWarningEvent, ContractError, ContinuousFlow, StreamStatus, 
-    UtilityContract, BUFFER_DURATION_SECONDS, BUFFER_WARNING_THRESHOLD
+    UtilityContract, UtilityContractClient, BUFFER_DURATION_SECONDS, BUFFER_WARNING_THRESHOLD
 };
 
 #[test]

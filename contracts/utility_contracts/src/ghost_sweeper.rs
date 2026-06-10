@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
     Address, BytesN, Env, Symbol, Vec,
 };
 
@@ -102,6 +102,7 @@ pub struct SweeperResult {
 }
 
 /// Ghost Stream Sweeper contract
+#[contract]
 pub struct GhostSweeper;
 
 #[contractimpl]
@@ -186,7 +187,7 @@ impl GhostSweeper {
         };
 
         env.events().publish(
-            (symbol_short!("GhostStreamPruned"),),
+            (symbol_short!("GSPrune"),),
             prune_event,
         );
 
@@ -209,23 +210,10 @@ impl GhostSweeper {
         let mut total_gas_bounty = 0i128;
 
         for stream_id in stream_ids.iter() {
-            let result = std::panic::catch_unwind(|| {
-                Self::prune_ghost_stream(env.clone(), stream_id, relayer.clone())
-            });
-
-            match result {
-                Ok(bounty) => {
-                    streams_pruned += 1;
-                    total_gas_bounty += bounty;
-                    
-                    // Estimate bytes reclaimed (average stream size)
-                    total_bytes_reclaimed += 500; // Estimated average stream size in bytes
-                }
-                Err(_) => {
-                    // Stream not eligible or error occurred - continue with others
-                    continue;
-                }
-            }
+            let bounty = Self::prune_ghost_stream(env.clone(), stream_id, relayer.clone());
+            streams_pruned += 1;
+            total_gas_bounty += bounty;
+            total_bytes_reclaimed += 500;
         }
 
         let operation_duration = env.ledger().timestamp() - start_time;
@@ -240,7 +228,7 @@ impl GhostSweeper {
 
         // Emit batch operation event
         env.events().publish(
-            (symbol_short!("BatchGhostSweep"),),
+            (symbol_short!("BGSweep"),),
             sweeper_result.clone(),
         );
 
@@ -390,7 +378,7 @@ impl GhostSweeper {
     /// Estimate storage size of a stream
     fn estimate_stream_storage_size(stream: &ContinuousFlow) -> u64 {
         // Base stream size + MAC address mapping + overhead
-        let base_size = std::mem::size_of::<ContinuousFlow>() as u64;
+        let base_size = core::mem::size_of::<ContinuousFlow>() as u64;
         let mac_mapping_size = if stream.device_mac_pubkey != BytesN::from_array(&[0u8; 32]) {
             64 // Estimated size of MAC address mapping
         } else {

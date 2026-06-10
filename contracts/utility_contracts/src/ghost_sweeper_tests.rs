@@ -1,3 +1,5 @@
+extern crate std;
+
 use soroban_sdk::{testutils::Address as TestAddress, testutils::BytesN as TestBytesN, Env, Address, Vec};
 use crate::ghost_sweeper::{
     GhostSweeper, GhostStreamPruned, StreamArchive, PruneReason, GhostStreamCandidate,

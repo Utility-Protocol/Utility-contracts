@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+extern crate std;
+
 use crate::*;
 use soroban_sdk::{
     testutils::{Address as TestAddress, Ledger as TestLedger},

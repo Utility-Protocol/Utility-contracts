@@ -25,11 +25,19 @@
 //! This module implements Issue #260: Tamper-Proof Hardware Nonce Sync
 
 use soroban_sdk::{
-    contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short,
     Address, Bytes, BytesN, Env, Symbol, Vec,
 };
 
-use crate::{ContractError, DataKey};
+use crate::{ContractError, DataKey, validate_ed25519_signature, validate_ed25519_public_key};
+
+fn validate_device_mac_hash(device_mac: &BytesN<32>) -> Result<(), ContractError> {
+    let zero_mac = soroban_sdk::BytesN::from_array(&[0u8; 32]);
+    if device_mac == &zero_mac {
+        return Err(ContractError::InvalidDeviceMac);
+    }
+    Ok(())
+}
 
 /// Device nonce tracking for tamper-proof liveness verification
 /// Issue #260: Tamper-Proof Hardware Nonce Sync
@@ -428,6 +436,7 @@ impl DeviceNonceState {
 /// # Issue Reference
 ///
 /// Implements Issue #260: Tamper-Proof Hardware Nonce Sync
+#[contract]
 pub struct NonceSyncManager;
 
 #[contractimpl]
@@ -511,7 +520,7 @@ impl NonceSyncManager {
 
                 // Emit success event
                 env.events().publish(
-                    (symbol_short!("HeartbeatValid"),),
+                    (symbol_short!("HBeatOk"),),
                     (heartbeat.meter_id, heartbeat.device_mac, heartbeat.nonce),
                 );
 
@@ -624,7 +633,7 @@ impl NonceSyncManager {
 
             // Emit reset event
             env.events().publish(
-                (symbol_short!("NonceReset"),),
+                (symbol_short!("NReset"),),
                 (meter_id, device_mac, new_nonce, approver),
             );
         } else {
@@ -636,7 +645,7 @@ impl NonceSyncManager {
 
             // Emit approval event
             env.events().publish(
-                (symbol_short!("NonceResetApproved"),),
+                (symbol_short!("NRstApp"),),
                 (meter_id, device_mac, approver, reset_request.approvals.len()),
             );
         }
@@ -739,7 +748,7 @@ impl NonceSyncManager {
             .set(&device_key, &nonce_state);
 
         env.events().publish(
-            (symbol_short!("NonceInitialized"),),
+            (symbol_short!("NInit"),),
             (device_mac, initial_nonce),
         );
     }
@@ -820,7 +829,7 @@ impl NonceSyncManager {
         };
 
         env.events().publish(
-            (symbol_short!("NonceDesyncAlert"),),
+            (symbol_short!("NDSync"),),
             alert,
         );
 

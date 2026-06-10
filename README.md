@@ -1,113 +1,146 @@
 # Utility Drip Contracts
 
-A Soroban smart contract for utility metering and billing with gas buffer functionality to ensure reliable provider withdrawals during network congestion.
+Soroban smart contracts for a decentralized utility metering and streaming protocol on Stellar. Supports prepaid/postpaid billing, continuous streaming, variable-rate tariffs, gas buffers, ZK-SNARK sensor privacy, multi-sig governance, and emergency response.
 
 ## Features
 
-### Core Functionality
-- **Utility Metering**: Track energy consumption with precision billing
-- **Prepaid & Postpaid Billing**: Support for both billing models
-- **Provider Withdrawals**: Automated daily withdrawal limits (10% of total pool)
-- **Usage Tracking**: Detailed watt-hour consumption data
-- **Heartbeat Monitoring**: Detect offline meters automatically
-
-### 🆕 Gas Buffer Feature
-The Gas Buffer feature ensures **100% Service Availability** even during periods of extreme Stellar network congestion:
-
-- **Pre-paid Gas**: Providers can deposit XLM as a gas buffer during initialization
-- **Automatic Fallback**: When network fees spike, the contract uses the gas buffer to ensure withdrawal transactions clear
-- **Critical Utility Payouts**: Guarantees that essential utility payments succeed even in stressed blockchain environments
-- **Buffer Management**: Providers can top-up, withdraw, and monitor their gas buffer balance
+- **Utility Metering** — Track energy/water consumption with precision billing
+- **Prepaid & Postpaid Billing** — Both models supported
+- **Continuous Streaming** — Real-time balance monitoring with buffer protection
+- **Variable Rate Tariffs** — Peak/off-peak pricing (18:00–21:00 UTC at 1.5× rate)
+- **Gas Buffer** — Pre-paid XLM buffer ensures withdrawals clear during network congestion
+- **ZK-SNARK Privacy** — Groth16 proofs let meters prove usage without revealing raw readings
+- **Firmware Update Gate** — Time-limited, cryptographically signed update authorization
+- **Multi-Sig Governance** — 3-of-5 finance wallet quorum for large withdrawals
+- **Emergency Response** — Circuit breakers, legal freezes, velocity limits, protocol pauses
+- **Dust Sweeper** — Prunes fractional remainders from depleted streams
+- **Grant Stream** — Conservation goals trigger automatic grant matching
 
 ## Project Structure
 
-```text
-.
-├── contracts
-│   └── utility_contracts
-│       ├── src
-│       │   ├── lib.rs         # Main contract implementation
-│       │   └── test.rs        # Comprehensive test suite
-│       └── Cargo.toml
-├── Cargo.toml
-├── README.md
-└── HARDWARE.md
+```
+Utility-Drip-Contracts/
+├── contracts/
+│   ├── Cargo.toml                  # Workspace root
+│   ├── utility_contracts/          # Main contract
+│   │   ├── src/lib.rs              # Core implementation
+│   │   ├── src/test.rs             # Test suite
+│   │   └── Cargo.toml
+│   └── price_oracle/               # Price oracle contract
+├── meter-simulator/                # Device simulator (JS)
+├── examples/                       # Usage examples
+├── scripts/                        # Deployment scripts
+├── .github/workflows/ci.yml        # CI pipeline
+├── SECURITY.md                     # Security policy & formal proofs
+├── CONTRIBUTING.md                 # Contribution guidelines
+└── EMERGENCY_RUNBOOK.md            # Emergency procedures
 ```
 
-## Gas Buffer Implementation
+## Architecture
 
-### Key Components
+### Variable Rate Tariffs
 
-1. **GasBuffer Structure**:
-   ```rust
-   pub struct GasBuffer {
-       pub balance: i128,
-       pub last_top_up: u64,
-       pub provider: Address,
-       pub token: Address,
-   }
-   ```
+Peak hours: **18:00–21:00 UTC** (1.5× off-peak rate).
 
-2. **Constants**:
-   - `MIN_GAS_BUFFER`: 100 XLM (minimum required buffer)
-   - `MAX_GAS_BUFFER`: 10,000 XLM (maximum buffer capacity)
-   - `GAS_BUFFER_TOP_UP_THRESHOLD`: 200 XLM (auto-top up trigger)
+```
+Peak rate = off_peak_rate × 3 / 2
 
-3. **Functions**:
-   - `initialize_gas_buffer()`: Set up initial gas buffer
-   - `top_up_gas_buffer()`: Add funds to existing buffer
-   - `withdraw_from_gas_buffer()`: Remove excess funds (maintaining minimum)
-   - `get_gas_buffer_balance()`: Check current buffer status
+Example: off_peak = 10 tokens/sec
+         peak     = 15 tokens/sec
+```
 
-### How It Works
+| UTC Hour | Seconds | Status |
+|----------|---------|--------|
+| 00:00    | 0       | OFF-PEAK |
+| 12:00    | 43,200  | OFF-PEAK |
+| 18:00    | 64,800  | PEAK |
+| 20:59    | 75,599  | PEAK |
+| 21:00    | 75,600  | OFF-PEAK |
 
-1. **Initialization**: Provider sets up gas buffer with minimum 100 XLM
-2. **Normal Operation**: Regular withdrawals use standard token transfers
-3. **High Fee Detection**: When network congestion is detected, contract automatically:
-   - Deducts gas fee from buffer
-   - Ensures withdrawal transaction succeeds
-   - Emits `GasBufferUsed` event for transparency
-4. **Buffer Management**: Provider can monitor and replenish buffer as needed
+### Gas Buffer
 
-## Deployed Contract
+Ensures 100% service availability during network congestion.
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MIN_GAS_BUFFER` | 100 XLM | Minimum required buffer |
+| `MAX_GAS_BUFFER` | 10,000 XLM | Maximum buffer capacity |
+| `GAS_BUFFER_TOP_UP_THRESHOLD` | 200 XLM | Auto top-up trigger |
+
+### Firmware Update Authorization Gate
+
+Provider-initiated, device-completed firmware updates with Ed25519 signature verification and a 2-hour maximum window.
+
+### Stream Balance Invariant (Formal Proof)
+
+> For every active stream: `current_time ≤ start_time + ⌊initial_balance / flow_rate⌋`
+
+Verified via 15 property tests with 100+ randomized cases each, covering pause/resume cycles, rounding direction, and overflow protection.
+
+### Security Properties
+
+- **Nonce sync** prevents replay attacks on IoT heartbeats
+- **Multi-sig veto** for fleet-level config changes (48h staging window)
+- **Carbon-credit streaming** with fractional accumulator and deferred minting
+- **Auto-rent deduction** capped at 1,000 stroops per claim
+
+## Deployment
+
 - **Network:** Stellar Testnet
-- **Contract ID:** CB7PSJZALNWNX7NLOAM6LOEL4OJZMFPQZJMIYO522ZSACYWXTZIDEDSS
+- **Contract ID:** `CB7PSJZALNWNX7NLOAM6LOEL4OJZMFPQZJMIYO522ZSACYWXTZIDEDSS`
 
-## Additional Documentation
-- [Hardware Spec Integration](HARDWARE.md)
+## Development
 
-## Usage Examples
+```bash
+# Build
+cd contracts && cargo build --target wasm32-unknown-unknown --release
 
-### Setting Up Gas Buffer
-```rust
-// Initialize gas buffer with 500 XLM
-contract.initialize_gas_buffer(
-    &provider_address,
-    &xlm_token_address,
-    &500
-);
+# Test
+cargo test
+
+# Lint
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-### Checking Buffer Status
-```rust
-let buffer_balance = contract.get_gas_buffer_balance(&provider_address);
-println!("Current gas buffer: {} XLM", buffer_balance);
+## CI/CD Pipeline
+
+The GitHub Actions workflow (`.github/workflows/ci.yml`) automatically runs on:
+- **Push to main branch** - Ensures main branch is always tested
+- **Pull Requests to main** - Prevents breaking changes from being merged
+
+### Testing Stages
+
+1. **Environment Setup**: Rust toolchain with WASM target, Stellar CLI v25.1.0, dependency caching
+2. **Code Quality**: `cargo fmt --all -- --check` + `cargo clippy --target wasm32-unknown-unknown -- -D warnings`
+3. **Build**: `cargo build --target wasm32-unknown-unknown --release`
+4. **Unit Tests**: `cargo test` including fuzz tests
+5. **Fuzz Tests**: Auto-detection and validation of fuzz infrastructure
+
+### Local Development
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --target wasm32-unknown-unknown -- -D warnings
+cargo build --target wasm32-unknown-unknown --release
+cargo test
 ```
 
-### Topping Up Buffer
-```rust
-// Add 200 XLM to gas buffer
-contract.top_up_gas_buffer(
-    &provider_address,
-    &xlm_token_address,
-    &200
-);
-```
+## ZK-SNARK Circuits for Sensor Privacy
 
-## Benefits
+Hardware devices (meters) prove consumed energy/water amounts without revealing raw sensor readings using Groth16 proofs.
 
-- **Reliability**: Ensures critical utility payments never fail due to network congestion
-- **Reputation**: Maintains 100% service availability guarantee
-- **Flexibility**: Providers control their buffer size and management
-- **Transparency**: All gas buffer operations emit events for monitoring
-- **Cost-Effective**: Only uses buffer when necessary, preserves provider capital
+**Circuit (Circom):**
+- **Private inputs**: `usage_raw`, `salt`, `last_usage`
+- **Public inputs**: `units_consumed`, `is_peak_hour`, `nullifier`, `commitment`
+- **Constraints**: Integrity, range proof, commitment hash (Poseidon), nullifier uniqueness
+
+**Flow**: Device generates proof → submits via `submit_zk_usage_report` → contract verifies with BN254 host functions (`pairing_check`, `g1_add`, `g1_mul`) → nullifier checked → balance deducted.
+
+**Optimization**: Pre-computed verification key components, optimized host functions for EC ops, no big-integer WASM arithmetic.
+
+See [EMERGENCY_RUNBOOK.md](EMERGENCY_RUNBOOK.md) for operational procedures and [SECURITY.md](SECURITY.md) for formal verification results.
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the same license as the project.

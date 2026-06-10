@@ -1,4 +1,10 @@
+extern crate std;
+
 use soroban_sdk::{testutils::Address as TestAddress, testutils::BytesN as TestBytesN, Env, Address, BytesN};
+use std::vec;
+use std::format;
+use std::vec::Vec;
+use std::string::String;
 use crate::nonce_sync::{
     NonceSyncManager, SignedHeartbeat, DeviceNonceState, NonceDesyncAlert, 
     NonceAlertType, NONCE_WINDOW_SIZE, NonceResetRequest
@@ -273,22 +279,22 @@ pub mod nonce_sync_fuzz_tests {
         let state = NonceSyncManager::get_device_nonce_state(env.clone(), device_mac.clone());
         assert!(state.current_nonce > 0);
     }
+}
 
-    /// Helper function to create test heartbeat
-    fn create_test_heartbeat(
-        meter_id: u64,
-        device_mac: BytesN<32>,
-        nonce: u64,
-    ) -> SignedHeartbeat {
-        let env = Env::new();
-        SignedHeartbeat {
-            meter_id,
-            device_mac,
-            nonce,
-            timestamp: env.ledger().timestamp(),
-            signature: BytesN::from_array(&[1u8; 64]), // Dummy signature
-            public_key: BytesN::from_array(&[2u8; 32]), // Dummy public key
-        }
+/// Helper function to create test heartbeat
+pub(crate) fn create_test_heartbeat(
+    meter_id: u64,
+    device_mac: BytesN<32>,
+    nonce: u64,
+) -> SignedHeartbeat {
+    let env = Env::new();
+    SignedHeartbeat {
+        meter_id,
+        device_mac,
+        nonce,
+        timestamp: env.ledger().timestamp(),
+        signature: BytesN::from_array(&[1u8; 64]),
+        public_key: BytesN::from_array(&[2u8; 32]),
     }
 }
 

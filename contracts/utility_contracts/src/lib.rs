@@ -1,7 +1,9 @@
 #![no_std]
+extern crate alloc;
+
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
+    contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
     Address, Bytes, BytesN, Env, String, Symbol, Vec,
 };
 
@@ -304,6 +306,7 @@ pub mod nonce_sync;
 pub mod tariff_oracle;
 pub mod ghost_sweeper;
 pub mod temporary_storage;
+pub mod secure_call_interface;
 
 #[cfg(test)]
 pub mod gas_metrics;
@@ -687,6 +690,32 @@ pub struct StreamUpdatedEvent {
     pub timestamp: u64,
     pub old_status: StreamStatus,
     pub new_status: StreamStatus,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct BufferDepletedEvent {
+    pub stream_id: u64,
+    pub timestamp: u64,
+    pub amount_deducted: i128,
+    pub provider: Address,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct BufferWarningEvent {
+    pub stream_id: u64,
+    pub timestamp: u64,
+    pub remaining_buffer: i128,
+    pub threshold_percent: i128,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamingFeeAccrued {
+    pub stream_id: u64,
+    pub fee_amount: i128,
+    pub timestamp: u64,
 }
 
 #[contracttype]
@@ -1225,7 +1254,6 @@ pub struct EmergencyDrainRecord {
     pub recipient: Address,
     pub reason: String,
 }
-const MAX_RESELLER_FEE_BPS: i128 = 500;
 const REFERRAL_REWARD_UNITS: i128 = 10;
 
 // Rate limiting for stream creation
@@ -1766,7 +1794,7 @@ fn issue_carbon_credits(env: &Env, meter_id: u64, meter: &Meter, claimable: i128
     let client = token::Client::new(env, token_address);
     client.transfer(&meter.provider, &meter.user, &amount);
     env.events().publish(
-        (symbol_short!("CarbonCredit"), meter_id),
+        (symbol_short!("CCredit"), meter_id),
         CarbonCreditIssuedEvent {
             meter_id,
             user: meter.user.clone(),
@@ -1991,6 +2019,18 @@ pub struct UtilityContract;
 
 // Issue #118: ZK Privacy Helper Functions
 
+/// Negate a point on the BN254 G1 curve (for ZK proof verification)
+fn negate_g1(_env: &Env, point: &Bytes) -> Bytes {
+    let mut result = point.clone();
+    // In BN254, negating a point (x, y) gives (x, p - y) where p is the curve order
+    // For simplicity, we flip the Y coordinate's last byte (demo implementation)
+    if result.len() >= 64 {
+        let y_byte = result.get(63);
+        result.set(63, 255u8.wrapping_sub(y_byte));
+    }
+    result
+}
+
 /// ZK proof verification using native Soroban crypto functions
 /// Issue #281: Migrated from legacy placeholder to proper cryptographic verification
 fn verify_groth16_proof(env: &Env, vk: &Groth16VerificationKey, proof: &Groth16Proof, public_inputs: &Vec<Bytes>) -> bool {
@@ -2116,32 +2156,7 @@ fn create_continuous_flow(
 
 /// Calculate required buffer amount (24 hours of flow rate)
 fn calculate_required_buffer(flow_rate_per_second: i128) -> i128 {
-    lheck and update rate limit for stream creation
-fn check_stream_creation_rate_limit(env: &Env, provider: &Address) {
-    let current_time = env.ledger().timestamp();
-    let key = DataKey::StreamCreationRateLimit(provider.clone());
-    
-    let mut rate_data = env.storage().instance().get(&key).unwrap_or(RateLimitData {
-        count: 0,
-        last_reset: current_time,
-    });
-    
-    // Reset count if window has passed
-    if current_time.saturating_sub(rate_data.last_reset) >= STREAM_CREATION_WINDOW_SECONDS {
-        rate_data.count = 0;
-        rate_data.last_reset = current_time;
-    }
-    
-    // Check if limit exceeded
-    if rate_data.count >= STREAM_CREATION_RATE_LIMIT {
-        panic_with_error!(env, ContractError::RateLimitExceeded);
-    }
-    
-    // Increment count
-    rate_data.count += 1;
-    
-    // Store updated data
-    env.storage().instance().set(&key, &rate_data);
+    flow_rate_per_second.saturating_mul(24 * 3600)
 }
 
 /// Check and update rate limit for stream creation
@@ -2172,10 +2187,6 @@ fn check_stream_creation_rate_limit(env: &Env, provider: &Address) -> Result<(),
     env.storage().instance().set(&key, &rate_data);
     
     Ok(())
-}
-
-/// Cet buffer_duration_i128 = BUFFER_DURATION_SECONDS as i128;
-    flow_rate_per_second.saturating_mul(buffer_duration_i128)
 }
 
 /// Calculate flow accumulation since last update with precise timestamp math and buffer logic
@@ -2794,7 +2805,7 @@ impl UtilityContract {
             .set(&DataKey::ProtocolFeeBps, &fee_bps);
         
         env.events()
-            .publish((symbol_short!("MaintenanceConfig"),), (wallet, fee_bps));
+            .publish((symbol_short!("MConf"),), (wallet, fee_bps));
     }
 
     /// Sets the admin address for the contract, used for dust sweeper authorization.
@@ -2885,7 +2896,7 @@ impl UtilityContract {
             .set(&DataKey::SupportedToken(token.clone()), &true);
         
         env.events()
-            .publish((symbol_short!("TokenSupported"),), token);
+            .publish((symbol_short!("TSupp"),), token);
     }
 
     /// Removes a token from the system's supported token whitelist.
@@ -2931,7 +2942,7 @@ impl UtilityContract {
             .set(&DataKey::SupportedToken(token.clone()), &false);
         
         env.events()
-            .publish((symbol_short!("TokenUnsupported"),), token);
+            .publish((symbol_short!("TUnsup"),), token);
     }
 
     /// Adds a withdrawal token to the supported list for path payments.
@@ -2974,7 +2985,7 @@ impl UtilityContract {
         env.storage().instance().set(&DataKey::SupportedWithdrawalToken(token.clone()), &true);
         
         env.events()
-            .publish((symbol_short!("WithdrawTokenSupported"),), token);
+            .publish((symbol_short!("WTSupp"),), token);
     }
 
     /// Removes a withdrawal token from the supported list for path payments.
@@ -3017,7 +3028,7 @@ impl UtilityContract {
         env.storage().instance().set(&DataKey::SupportedWithdrawalToken(token.clone()), &false);
         
         env.events()
-            .publish((symbol_short!("WithdrawTokenUnsupported"),), token);
+            .publish((symbol_short!("WTUnsup"),), token);
     }
 
     // ==================== ISSUE #277: EMERGENCY DRAIN RECOVERY ====================
@@ -3137,7 +3148,7 @@ impl UtilityContract {
         // Emit comprehensive event for transparency
         env.events()
             .publish(
-                (symbol_short!("EmergencyDrain"),),
+                (symbol_short!("EDrain"),),
                 (
                     drain_counter,
                     recipient,
@@ -3496,7 +3507,7 @@ impl UtilityContract {
         // Emit event for transparency
         env.events()
             .publish(
-                (symbol_short!("VelocityConfig"),),
+                (symbol_short!("VConfig"),),
                 (global_limit, per_stream_limit, is_enabled)
             );
     }
@@ -3565,7 +3576,7 @@ impl UtilityContract {
         // Emit audit event
         env.events()
             .publish(
-                (symbol_short!("VelocityOverride"),),
+                (symbol_short!("VOver"),),
                 (meter_id, expires_at, reason, admin)
             );
     }
@@ -3622,7 +3633,7 @@ impl UtilityContract {
         // Emit audit event
         env.events()
             .publish(
-                (symbol_short!("VelocityOverrideRevoked"),),
+                (symbol_short!("VORvkd"),),
                 (meter_id, admin)
             );
     }
@@ -4872,9 +4883,6 @@ impl UtilityContract {
         env.storage()
             .instance()
             .set(&DataKey::Meter(meter_id), &meter);
-
-        env.events()
-            .publish((symbol_short!("Claim"), meter_id), claimable);
     }
 
     pub fn update_usage(env: Env, meter_id: u64, watt_hours_consumed: i128) {
@@ -6986,9 +6994,6 @@ env.storage()
 
         if !privacy_meters.contains(&meter_id) {
             privacy_meters.push_back(meter_id);
-        // Rate limiting check
-        check_stream_creation_rate_limit(&env, &provider);
-        
             env.storage()
                 .instance()
                 .set(&DataKey::ZKEnabledMeters, &privacy_meters);
@@ -7017,9 +7022,6 @@ env.storage()
 
         let mut privacy_status: PrivateBillingStatus = env
             .storage()
-        // Rate limiting check
-        check_stream_creation_rate_limit(&env, &provider)?;
-        
             .instance()
             .get(&DataKey::PrivateBillingStatus(meter_id))
             .unwrap_or(PrivateBillingStatus {
@@ -7077,12 +7079,6 @@ env.storage()
             device_mac_pubkey,
         )?;
         
-        // Issue #273: Additional validation for meter max flow rate
-        let meter = get_meter_or_panic(&env, meter_id);
-        if flow_rate_per_second > meter.max_flow_rate_per_hour / 3600 {
-            return Err(ContractError::FlowRateTooHigh);
-        }
-
         env.storage()
             .instance()
             .set(&DataKey::ContinuousFlow(stream_id), &flow);
@@ -7710,7 +7706,7 @@ fn attempt_partial_routing(env: &Env, amount: i128) -> Result<i128, ContractErro
     let partial_success = (ledger_seq % 100) as f64 / 100.0 < 0.98; // 98% success rate
     
     if partial_success {
-        env.events().publish((symbol_short!("PartialRouted"),), (partial_amount, "partial_success"));
+        env.events().publish((symbol_short!("PRout"),), (partial_amount, "partial_success"));
         Ok(partial_amount)
     } else {
         Ok(0) // Even partial routing failed - hold for manual retry

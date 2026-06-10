@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 /// Automated Gas Metering Metrics for Unit Tests
 ///
 /// This module provides comprehensive gas measurement and analytics capabilities
@@ -22,12 +24,17 @@
 ///   3. Reports show gas vs estimated costs
 ///   4. Regression detection alerts on unexpected increases
 
-#![cfg(test)]
+extern crate std;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::println;
+use std::format;
+use std::vec;
+use alloc::vec::Vec;
+use alloc::string::String;
 
 // ============================================================================
 // Constants for Gas Cost Baseline
@@ -124,16 +131,16 @@ impl GasStatistics {
 
 /// Global gas meter for collecting metrics across all tests
 pub struct GasMeter {
-    measurements: RefCell<Vec<GasMeasurement>>,
-    test_stack: RefCell<Vec<String>>,
+    measurements: Mutex<Vec<GasMeasurement>>,
+    test_stack: Mutex<Vec<String>>,
     operation_counter: AtomicUsize,
 }
 
 impl GasMeter {
     fn new() -> Self {
         GasMeter {
-            measurements: RefCell::new(Vec::new()),
-            test_stack: RefCell::new(Vec::new()),
+            measurements: Mutex::new(Vec::new()),
+            test_stack: Mutex::new(Vec::new()),
             operation_counter: AtomicUsize::new(0),
         }
     }
@@ -146,12 +153,12 @@ impl GasMeter {
         actual_gas: i128,
     ) {
         let operation_name = operation_name.into();
-        let test_name = self
-            .test_stack
-            .borrow()
+        let test_stack = self.test_stack.lock().unwrap();
+        let test_name = test_stack
             .last()
             .cloned()
             .unwrap_or_else(|| "unknown".to_string());
+        drop(test_stack);
 
         let measurement = GasMeasurement {
             operation_name,
@@ -164,29 +171,30 @@ impl GasMeter {
             test_name,
         };
 
-        self.measurements.borrow_mut().push(measurement);
+        self.measurements.lock().unwrap().push(measurement);
         self.operation_counter.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Begin a test context
     pub fn push_test(&self, test_name: impl Into<String>) {
-        self.test_stack.borrow_mut().push(test_name.into());
+        self.test_stack.lock().unwrap().push(test_name.into());
     }
 
     /// End a test context
     pub fn pop_test(&self) {
-        self.test_stack.borrow_mut().pop();
+        self.test_stack.lock().unwrap().pop();
     }
 
     /// Get all measurements
     pub fn get_measurements(&self) -> Vec<GasMeasurement> {
-        self.measurements.borrow().clone()
+        self.measurements.lock().unwrap().clone()
     }
 
     /// Get measurements for a specific operation
     pub fn get_operation_measurements(&self, operation_name: &str) -> Vec<GasMeasurement> {
         self.measurements
-            .borrow()
+            .lock()
+            .unwrap()
             .iter()
             .filter(|m| m.operation_name == operation_name)
             .cloned()
@@ -222,7 +230,7 @@ impl GasMeter {
 
     /// Get statistics for all operations
     pub fn get_all_statistics(&self) -> BTreeMap<String, GasStatistics> {
-        let measurements = self.measurements.borrow();
+        let measurements = self.measurements.lock().unwrap();
         let mut operation_names: std::collections::HashSet<_> =
             measurements.iter().map(|m| m.operation_name.clone()).collect();
 
@@ -238,7 +246,8 @@ impl GasMeter {
     /// Get measurements exceeding a gas threshold
     pub fn get_expensive_operations(&self, threshold: i128) -> Vec<GasMeasurement> {
         self.measurements
-            .borrow()
+            .lock()
+            .unwrap()
             .iter()
             .filter(|m| m.actual_gas > threshold)
             .cloned()
@@ -248,7 +257,8 @@ impl GasMeter {
     /// Get measurements deviating from estimates
     pub fn get_deviations(&self, tolerance_percent: f64) -> Vec<GasMeasurement> {
         self.measurements
-            .borrow()
+            .lock()
+            .unwrap()
             .iter()
             .filter(|m| !m.is_within_tolerance(tolerance_percent))
             .cloned()
@@ -257,8 +267,8 @@ impl GasMeter {
 
     /// Clear all measurements
     pub fn clear(&self) {
-        self.measurements.borrow_mut().clear();
-        self.test_stack.borrow_mut().clear();
+        self.measurements.lock().unwrap().clear();
+        self.test_stack.lock().unwrap().clear();
         self.operation_counter.store(0, Ordering::SeqCst);
     }
 

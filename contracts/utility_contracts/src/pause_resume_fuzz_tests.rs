@@ -1,10 +1,14 @@
 #![cfg(test)]
 
+extern crate std;
+
 use crate::*;
 use soroban_sdk::{
     testutils::{Address as TestAddress, Ledger as TestLedger},
     Address, Env,
 };
+use std::vec;
+use std::format;
 
 #[cfg(test)]
 mod pause_resume_fuzz {

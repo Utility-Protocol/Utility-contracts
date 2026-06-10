@@ -1,3 +1,5 @@
+extern crate std;
+
 use soroban_sdk::{testutils::Address as TestAddress, testutils::BytesN as TestBytesN, Env, Address, Vec};
 use crate::tariff_oracle::{
     TariffOracle, DailyTariffSchedule, HourlyTariff, TariffTier, TariffUpdateProposal,
@@ -336,36 +338,6 @@ pub mod tariff_oracle_tests {
         assert_eq!(result.duration_seconds, 6 * 3600); // 6 hours
     }
 
-    /// Helper function to create test tariff schedule
-    fn create_test_schedule(env: &Env) -> DailyTariffSchedule {
-        let mut hourly_rates = Vec::new(env);
-        
-        for hour in 0..HOURS_IN_DAY {
-            let (rate_cents, tier, is_renewable) = match hour {
-                0..=6 | 22..=23 => (8, TariffTier::OffPeak, false),      // Night: off-peak
-                7..=10 | 17..=20 => (15, TariffTier::Peak, false),      // Morning/evening: peak
-                11..=16 => (12, TariffTier::Standard, true),            // Daytime: standard + renewable
-                _ => (10, TariffTier::Standard, false),                  // Default
-            };
-            
-            hourly_rates.push_back(HourlyTariff {
-                hour,
-                rate_cents_per_kwh: rate_cents,
-                tier,
-                is_renewable_hour: is_renewable,
-            });
-        }
-
-        DailyTariffSchedule {
-            hourly_rates,
-            schedule_date: 20240101,
-            signed_by: TestAddress::random(env),
-            created_at: env.ledger().timestamp(),
-            effective_at: env.ledger().timestamp(),
-            admin_signature: TestBytesN::random(env),
-        }
-    }
-
     /// Helper function to create peak-heavy tariff schedule
     fn create_peak_schedule(env: &Env) -> DailyTariffSchedule {
         let mut hourly_rates = Vec::new(env);
@@ -440,6 +412,36 @@ pub mod tariff_oracle_tests {
             effective_at: env.ledger().timestamp(),
             admin_signature: TestBytesN::random(env),
         }
+    }
+}
+
+/// Helper function to create test tariff schedule
+pub(crate) fn create_test_schedule(env: &Env) -> DailyTariffSchedule {
+    let mut hourly_rates = Vec::new(env);
+    
+    for hour in 0..HOURS_IN_DAY {
+        let (rate_cents, tier, is_renewable) = match hour {
+            0..=6 | 22..=23 => (8, TariffTier::OffPeak, false),
+            7..=10 | 17..=20 => (15, TariffTier::Peak, false),
+            11..=16 => (12, TariffTier::Standard, true),
+            _ => (10, TariffTier::Standard, false),
+        };
+        
+        hourly_rates.push_back(HourlyTariff {
+            hour,
+            rate_cents_per_kwh: rate_cents,
+            tier,
+            is_renewable_hour: is_renewable,
+        });
+    }
+
+    DailyTariffSchedule {
+        hourly_rates,
+        schedule_date: 20240101,
+        signed_by: TestAddress::random(env),
+        created_at: env.ledger().timestamp(),
+        effective_at: env.ledger().timestamp(),
+        admin_signature: TestBytesN::random(env),
     }
 }
 

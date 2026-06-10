@@ -5,6 +5,9 @@
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+    use std::vec::Vec;
+    use std::format;
     use soroban_sdk::{Address, Env, Symbol, BytesN};
     use crate::{
         temporary_storage::{TempStorageManager, OptimizedFlowCalculator, OptimizedUsageTracker},

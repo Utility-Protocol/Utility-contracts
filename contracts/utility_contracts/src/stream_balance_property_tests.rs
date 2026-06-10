@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 /// Property-Based Testing for Stream Balance Invariants
 ///
 /// This module uses proptest to verify critical stream balance invariants:
@@ -19,10 +21,51 @@
 ///   3. Sequential operations maintain invariants
 ///   4. No combination of inputs violates the invariants
 
-#![cfg(test)]
+extern crate std;
 
 use proptest::prelude::*;
 use std::cmp;
+use std::format;
+use std::vec;
+use std::println;
+use std::vec::Vec;
+use std::string::String;
+
+macro_rules! prop_assert_ge {
+    ($left:expr, $right:expr $(,)?) => {
+        prop_assert!($left >= $right, "{} was not >= {}", $left, $right)
+    };
+    ($left:expr, $right:expr, $msg:expr $(,)?) => {
+        prop_assert!($left >= $right, $msg)
+    };
+}
+
+macro_rules! prop_assert_le {
+    ($left:expr, $right:expr $(,)?) => {
+        prop_assert!($left <= $right, "{} was not <= {}", $left, $right)
+    };
+    ($left:expr, $right:expr, $msg:expr $(,)?) => {
+        prop_assert!($left <= $right, $msg)
+    };
+}
+
+macro_rules! assert_le {
+    ($left:expr, $right:expr $(,)?) => {
+        assert!($left <= $right, "{} was not <= {}", $left, $right)
+    };
+    ($left:expr, $right:expr, $msg:expr $(,)?) => {
+        assert!($left <= $right, $msg)
+    };
+}
+
+macro_rules! assert_ge {
+    ($left:expr, $right:expr $(,)?) => {
+        assert!($left >= $right, "{} was not >= {}", $left, $right)
+    };
+    ($left:expr, $right:expr, $msg:expr $(,)?) => {
+        assert!($left >= $right, $msg)
+    };
+}
 
 // ============================================================================
 // Constants

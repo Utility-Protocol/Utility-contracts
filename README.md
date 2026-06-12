@@ -1,4 +1,4 @@
-# Utility Drip Contracts
+# IoT-Billing-Service Contracts
 
 Soroban smart contracts for a decentralized utility metering and streaming protocol on Stellar. Supports prepaid/postpaid billing, continuous streaming, variable-rate tariffs, gas buffers, ZK-SNARK sensor privacy, multi-sig governance, and emergency response.
 
@@ -19,7 +19,7 @@ Soroban smart contracts for a decentralized utility metering and streaming proto
 ## Project Structure
 
 ```
-Utility-Drip-Contracts/
+Billing-contracts/
 ├── contracts/
 │   ├── Cargo.toml                  # Workspace root
 │   ├── utility_contracts/          # Main contract

@@ -1,4 +1,4 @@
-name: Utility Drip CI
+name: IoT-Billing-Service CI
 
 on:
   push:

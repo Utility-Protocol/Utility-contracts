@@ -4,7 +4,7 @@ This guide shows users how to verify their utility consumption data ("Usage Drip
 
 ## Overview
 
-The Utility Drip smart contract records all usage data on the Stellar blockchain, providing:
+The IoT-Billing-Service smart contract records all usage data on the Stellar blockchain, providing:
 - ✅ **Transparency** - All consumption data is publicly verifiable
 - ✅ **Immutability** - Data cannot be altered once recorded
 - ✅ **Audit Trail** - Complete history of all transactions
@@ -120,13 +120,13 @@ You'll see all transactions involving your account:
 
 #### Step 3: Filter by Contract
 
-Filter transactions to show only those interacting with the Utility Drip contract.
+Filter transactions to show only those interacting with the IoT-Billing-Service contract.
 
 ---
 
 ## Understanding Contract Events
 
-The Utility Drip contract emits several event types that you can track:
+The IoT-Billing-Service contract emits several event types that you can track:
 
 ### 1. UsageReported Event
 
@@ -291,7 +291,7 @@ Peak hour example:
 
 **Steps:**
 1. Search your provider address
-2. Filter transactions to Utility Drip contract
+2. Filter transactions to IoT-Billing-Service contract
 3. Look for `withdraw_earnings` operations
 4. Check amounts and timestamps
 5. Verify against your records
@@ -528,7 +528,7 @@ Example tools:
 - [Stellar Expert Documentation](https://stellar.expert/help)
 - [Stellar Developer Documentation](https://developers.stellar.org/)
 - [Soroban Documentation](https://soroban.stellar.org/)
-- [Utility Drip Contract Documentation](../README.md)
+- [IoT-Billing-Service Contract Documentation](../README.md)
 
 ---
 

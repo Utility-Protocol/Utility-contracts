@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Utility Drip smart contract now includes comprehensive TypeScript bindings that provide type-safe interfaces for the Node.js gateway. These bindings ensure perfect synchronization between the smart contract and frontend code.
+The IoT-Billing-Service smart contract now includes comprehensive TypeScript bindings that provide type-safe interfaces for the Node.js gateway. These bindings ensure perfect synchronization between the smart contract and frontend code.
 
 ## Installation
 

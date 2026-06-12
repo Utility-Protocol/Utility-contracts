@@ -1,6 +1,6 @@
 #!/usr/bin/env rust-script
 
-//! Doc-Comment Validation Script for Utility Drip Contracts
+//! Doc-Comment Validation Script for IoT-Billing-Service Contracts
 //! 
 //! This script validates that all public functions, structs, and enums
 //! have comprehensive documentation as required for audit readiness.
@@ -12,7 +12,7 @@ use std::fs;
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🔍 Validating doc-comment coverage for Utility Drip Contracts...\n");
+    println!("🔍 Validating doc-comment coverage for IoT-Billing-Service Contracts...\n");
     
     let contracts_dir = Path::new("contracts/utility_contracts/src");
     let mut total_items = 0;

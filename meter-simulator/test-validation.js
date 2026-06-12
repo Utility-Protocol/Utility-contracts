@@ -52,7 +52,7 @@ console.log('\n📦 Validating package.json:');
 try {
   const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   
-  if (packageJson.name === 'utility-drip-meter-simulator') {
+  if (packageJson.name === 'billing-contracts-meter-simulator') {
     console.log('✅ Package name correct');
   } else {
     console.log('❌ Package name incorrect');

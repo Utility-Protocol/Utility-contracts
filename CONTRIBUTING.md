@@ -1,10 +1,10 @@
-# Contributing to Utility-Drip-Contracts
+# Contributing to Billing-contracts
 
-Welcome to the Utility-Drip-Contracts project! This guide will help you contribute effectively, whether you're working on hardware (C++/Arduino) or smart contracts (Soroban/Rust).
+Welcome to the Billing-contracts project! This guide will help you contribute effectively, whether you're working on hardware (C++/Arduino) or smart contracts (Soroban/Rust).
 
 ## Project Overview
 
-Utility-Drip-Contracts is a utility billing system built on Stellar that allows:
+Billing-contracts is a utility billing system built on Stellar that allows:
 - Individual meter billing and management
 - Group billing for property managers
 - Real-time balance monitoring
@@ -156,8 +156,8 @@ make test
 
 ### 1. Fork and Clone
 ```bash
-git clone https://github.com/your-username/Utility-Drip-Contracts.git
-cd Utility-Drip-Contracts
+git clone https://github.com/your-username/Billing-contracts.git
+cd Billing-contracts
 ```
 
 ### 2. Create Feature Branch
@@ -274,4 +274,4 @@ By contributing, you agree that your contributions will be licensed under the sa
 
 ---
 
-Thank you for contributing to Utility-Drip-Contracts! 🎉
+Thank you for contributing to Billing-contracts! 🎉

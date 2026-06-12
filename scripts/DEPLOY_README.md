@@ -1,6 +1,6 @@
-# 🚀 Utility Drip Deployment Script
+# 🚀 IoT-Billing-Service Deployment Script
 
-Quick and easy deployment of the Utility Drip smart contract to Stellar testnet or mainnet.
+Quick and easy deployment of the IoT-Billing-Service smart contract to Stellar testnet or mainnet.
 
 ## Features
 
@@ -76,7 +76,7 @@ Options:
 
 ### Contract Details
 
-- **Contract Name**: Utility Drip
+- **Contract Name**: IoT-Billing-Service
 - **Network**: Stellar (Soroban)
 - **WASM Format**: WebAssembly
 - **Contract Size**: ~100-200 KB
@@ -539,7 +539,7 @@ rm -rf scripts/__pycache__
 - [Stellar Documentation](https://developers.stellar.org/)
 - [Soroban Documentation](https://soroban.stellar.org/)
 - [Stellar Expert Explorer](https://stellar.expert/)
-- [Utility Drip Docs](../README.md)
+- [IoT-Billing-Service Docs](../README.md)
 
 ---
 
@@ -568,4 +568,4 @@ Need help?
 
 **Last Updated**: March 26, 2026  
 **Version**: 1.0.0  
-**Maintainer**: Utility Drip Team
+**Maintainer**: IoT-Billing-Service Team

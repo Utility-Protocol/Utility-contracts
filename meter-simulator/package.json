@@ -1,7 +1,7 @@
 {
-  "name": "utility-drip-meter-simulator",
+  "name": "billing-contracts-meter-simulator",
   "version": "1.0.0",
-  "description": "ESP32 meter simulator for Utility Drip smart contracts",
+  "description": "ESP32 meter simulator for IoT-Billing-Service smart contracts",
   "main": "src/index.js",
   "bin": {
     "meter-simulator": "./src/index.js"
@@ -14,7 +14,7 @@
     "ttl-check": "node src/ttl-monitor.js --check-only"
   },
   "keywords": ["iot", "stellar", "soroban", "utility", "meter", "simulator"],
-  "author": "Utility Drip Team",
+  "author": "IoT-Billing-Service Team",
   "license": "MIT",
   "dependencies": {
     "commander": "^11.1.0",

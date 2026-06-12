@@ -3,7 +3,7 @@
 ## Reporting a Vulnerability
 
 Please report security vulnerabilities by opening a **private** GitHub Security Advisory at:
-`https://github.com/Utility-Drip/Utility-Drip-Contracts/security/advisories/new`
+`https://github.com/IoT-Billing-Service/Billing-contracts/security/advisories/new`
 
 Do **not** open a public issue for security-sensitive findings.
 

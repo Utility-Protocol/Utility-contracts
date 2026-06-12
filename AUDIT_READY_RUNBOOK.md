@@ -1,4 +1,4 @@
-# Audit-Ready Runbook — Utility Drip Contracts
+# Audit-Ready Runbook — IoT-Billing-Service Contracts
 
 **Contract ID (Testnet):** `CB7PSJZALNWNX7NLOAM6LOEL4OJZMFPQZJMIYO522ZSACYWXTZIDEDSS`  
 **Network:** Stellar Testnet — replace `--network testnet` with `--network mainnet` for production  
@@ -36,7 +36,7 @@
 
 ## 1. Executive Summary
 
-The Utility Drip Contracts platform provides a decentralized utility streaming protocol with comprehensive security measures including:
+The IoT-Billing-Service Contracts platform provides a decentralized utility streaming protocol with comprehensive security measures including:
 
 - **Tamper-proof nonce synchronization** for IoT device liveness verification
 - **Time-of-Use tariff pricing** with 24-hour schedules
@@ -582,7 +582,7 @@ Level 4 (1 hour): Community, Public Relations
 
 ## Conclusion
 
-This runbook provides comprehensive procedures for managing the Utility Drip Contracts platform with the new security improvements implemented in Issues #260-263. The platform is now audit-ready with enterprise-grade documentation, comprehensive security measures, and operational procedures that meet the highest standards for decentralized utility management.
+This runbook provides comprehensive procedures for managing the IoT-Billing-Service Contracts platform with the new security improvements implemented in Issues #260-263. The platform is now audit-ready with enterprise-grade documentation, comprehensive security measures, and operational procedures that meet the highest standards for decentralized utility management.
 
 **Next Steps:**
 1. Schedule external security audit with Zealynx

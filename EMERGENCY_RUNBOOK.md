@@ -1,4 +1,4 @@
-# Emergency Runbook — Utility Drip Contracts
+# Emergency Runbook — IoT-Billing-Service Contracts
 
 **Contract ID (Testnet):** `CB7PSJZALNWNX7NLOAM6LOEL4OJZMFPQZJMIYO522ZSACYWXTZIDEDSS`  
 **Network:** Stellar Testnet — replace `--network testnet` with `--network mainnet` for production  

@@ -5,7 +5,7 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "IoT Payload Generator for Utility Drip Contracts", long_about = None)]
+#[command(author, version, about = "IoT Payload Generator for IoT-Billing-Service Contracts", long_about = None)]
 struct Args {
     /// Meter ID to simulate
     #[arg(short, long, default_value_t = 1)]

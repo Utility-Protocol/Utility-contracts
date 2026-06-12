@@ -1,4 +1,4 @@
-# Utility Drip Contract - Error Codes
+# IoT-Billing-Service Contract - Error Codes
 
 This document provides a mapping of on-chain error codes to user-friendly explanations and suggested actions. When a transaction fails, the frontend can use this guide to display a helpful message instead of a raw error.
 

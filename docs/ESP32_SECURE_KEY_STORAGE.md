@@ -4,7 +4,7 @@ A comprehensive guide for contributors on securely storing Ed25519 keys on ESP32
 
 ## Overview
 
-The Utility Drip system requires each ESP32 device to:
+The IoT-Billing-Service system requires each ESP32 device to:
 1. Generate an Ed25519 key pair
 2. Store the private key securely
 3. Use the private key to sign usage data
@@ -722,7 +722,7 @@ public:
 #include <WiFi.h>
 #include <HTTPClient.h>
 
-// Utility Drip contract integration
+// IoT-Billing-Service contract integration
 #include "utility_drip_types.h"
 
 class SecureMeter {
@@ -846,7 +846,7 @@ void setup() {
     Serial.begin(115200);
     delay(1000);
 
-    Serial.println("\n🚀 Utility Drip Meter Starting...");
+    Serial.println("\n🚀 IoT-Billing-Service Meter Starting...");
 
     // Initialize secure storage
     if (!meter.begin()) {
@@ -1041,7 +1041,7 @@ void setup() {
 - [ATECC608A Datasheet](https://ww1.microchip.com/downloads/en/DeviceDoc/20005926A.pdf)
 - [CryptoAuthLib Documentation](https://microchipcrypto.gitlab.io/avr-crypto-lib/)
 - [Ed25519 Specification](https://ed25519.cr.yp.to/)
-- [Utility Drip Contract Docs](../README.md)
+- [IoT-Billing-Service Contract Docs](../README.md)
 
 ---
 

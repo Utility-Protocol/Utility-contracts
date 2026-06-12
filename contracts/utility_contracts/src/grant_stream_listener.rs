@@ -6,7 +6,7 @@ use soroban_sdk::{
 };
 
 // --- Grant Stream Listener Contract ---
-// This contract listens for GoalReached events from IoT-Billing-Services and processes grant matches
+// This contract listens for GoalReached events from IoT-Billing-Service and processes grant matches
 
 #[contracttype]
 #[derive(Clone)]
@@ -89,10 +89,10 @@ impl GrantStreamListener {
             .publish((symbol_short!("GrantInit"),), (admin, treasury));
     }
 
-    /// Called by IoT-Billing-Services when a conservation goal is reached
+    /// Called by IoT-Billing-Service when a conservation goal is reached
     pub fn on_goal_reached(
         env: Env,
-        utility_drip_contract: Address,
+        billing_contract: Address,
         goal_event: super::GoalReachedEvent,
     ) {
         let config: GrantConfig = env
@@ -122,7 +122,7 @@ impl GrantStreamListener {
 
         match SecureCallManager::secure_call::<super::ConservationGoal>(
             &env,
-            &utility_drip_contract,
+            &billing_contract,
             &Symbol::new(&env, "get_conservation_goal"),
             args,
             Some(20_000_000), // Conservative gas limit for goal verification

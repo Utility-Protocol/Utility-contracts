@@ -80,7 +80,7 @@ pub fn validate_invariants(env: &Env, account: Address) {
 
 
 // --- Grant Stream Listener Contract ---
-// This contract listens for GoalReached events from IoT-Billing-Services and processes grant matches
+// This contract listens for GoalReached events from IoT-Billing-Service and processes grant matches
 
 #[contracttype]
 #[derive(Clone)]
@@ -161,7 +161,7 @@ impl GrantStreamListener {
         );
     }
 
-    /// Called by IoT-Billing-Services when a conservation goal is reached
+    /// Called by IoT-Billing-Service when a conservation goal is reached
     pub fn on_goal_reached(env: Env, goal_event: super::GoalReachedEvent) {
         let config: GrantConfig = env.storage()
             .instance()

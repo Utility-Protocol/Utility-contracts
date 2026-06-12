@@ -535,9 +535,9 @@ Level 4 (1 hour): Community, Public Relations
 ```
 
 **Emergency Channels:**
-- Signal Group: `utility-drip-emergency`
-- Telegram: `@utilitydrip_emergency`
-- PagerDuty: `utility-drip-security`
+- Signal Group: `iot-billing-emergency`
+- Telegram: `@iotbilling_emergency`
+- PagerDuty: `iot-billing-security`
 
 ---
 

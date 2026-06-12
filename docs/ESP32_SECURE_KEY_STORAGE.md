@@ -70,7 +70,7 @@ Choose the appropriate level based on your threat model:
 #include <mbedtls/ed25519.h>
 
 // NVS namespace for key storage
-static const char* KEY_NAMESPACE = "utility_drip";
+static const char* KEY_NAMESPACE = "iot_billing";
 static const char* PRIVATE_KEY_KEY = "priv_key";
 static const char* PUBLIC_KEY_KEY = "pub_key";
 
@@ -723,7 +723,7 @@ public:
 #include <HTTPClient.h>
 
 // IoT-Billing-Service contract integration
-#include "utility_drip_types.h"
+#include "iot_billing_types.h"
 
 class SecureMeter {
 private:

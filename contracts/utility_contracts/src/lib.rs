@@ -180,6 +180,15 @@ pub struct CreditLimitApproached {
     pub timestamp: u64,
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct ReadingRejected {
+    pub meter_id: u64,
+    pub reason: String,
+    pub value: i128,
+    pub timestamp: u64,
+}
+
 /// Emitted when the deposit is slashed at 100 % utilisation.
 #[contracttype]
 #[derive(Clone)]
@@ -285,6 +294,15 @@ pub struct UsageReport {
 }
 
 #[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ResourceType {
+    Electricity = 0,
+    Gas = 1,
+    Water = 2,
+    Heat = 3,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub struct SignedUsageData {
     pub meter_id: u64,
@@ -333,6 +351,7 @@ pub struct Meter {
     pub user: Address,
     pub provider: Address,
     pub billing_type: BillingType,
+    pub resource_type: ResourceType,
     pub off_peak_rate: i128,
     pub peak_rate: i128,
     pub rate_per_unit: i128,
@@ -1045,6 +1064,8 @@ pub enum DataKey {
     UpgradeApproval(u64, Address),
     UpgradeProposalCounter,
     ActiveUpgradeProposalId,
+    // Meter reading validation
+    LastReadingTime(u64),
 }
 
 #[contracterror(export = false)]
@@ -1177,6 +1198,10 @@ pub enum ContractError {
     // Flow rate validation errors
     FlowRateTooLow = 111,
     FlowRateTooHigh = 112,
+    // Meter reading validation errors
+    InvalidReadingValue = 113,
+    DuplicateTimestamp = 114,
+    ReadingDeltaTooLarge = 115,
 }
 
 #[contracttype]
@@ -1289,6 +1314,14 @@ pub(crate) const STORAGE_READ_COST: u64 = 5_000; // Cost of a single storage rea
 pub(crate) const STORAGE_WRITE_COST: u64 = 5_000; // Cost of a single storage write
 pub(crate) const CONTRACT_INVOCATION_COST: u64 = 10_000; // Cost of a contract invocation
 
+// Meter reading validation constants
+const STANDARD_INTERVAL: u64 = 300; // 5 minutes in seconds
+const MAX_INTERVAL_MULTIPLIER: u64 = 24;
+const MAX_ELECTRICITY_DELTA: i128 = 100 * 1_000_000_00; // 100 kWh per 5-min interval
+const MAX_GAS_DELTA: i128 = 50 * 1_000_000_00; // 50 m³ per 5-min interval
+const MAX_WATER_DELTA: i128 = 200 * 1_000_000_00; // 200 L per 5-min interval
+const MAX_HEAT_DELTA: i128 = 100 * 1_000_000_00; // 100 units per 5-min interval
+
 /// Validate Ed25519 public key byte array
 /// Ensures correct length and non-zero values
 fn validate_ed25519_public_key(public_key: &BytesN<32>) -> Result<(), ContractError> {
@@ -1393,6 +1426,62 @@ pub(crate) fn validate_page_size(page_size: u32) -> Result<u32, ContractError> {
 pub(crate) fn estimate_iteration_budget(num_items: u32) -> u64 {
     // Budget = (storage read cost per item * num items) + (budget check cost per item * num items)
     (STORAGE_READ_COST * num_items as u64) + (BUDGET_CHECK_COST * num_items as u64)
+}
+
+/// Get maximum allowed delta for a given resource type
+fn get_max_delta(resource_type: ResourceType) -> i128 {
+    match resource_type {
+        ResourceType::Electricity => MAX_ELECTRICITY_DELTA,
+        ResourceType::Gas => MAX_GAS_DELTA,
+        ResourceType::Water => MAX_WATER_DELTA,
+        ResourceType::Heat => MAX_HEAT_DELTA,
+    }
+}
+
+/// Validate meter reading values
+fn validate_reading(
+    env: &Env,
+    meter_id: u64,
+    resource_type: ResourceType,
+    watt_hours_consumed: i128,
+    units_consumed: i128,
+    timestamp: u64,
+) -> Result<(), ContractError> {
+    // Check if value is negative
+    if watt_hours_consumed < 0 || units_consumed < 0 {
+        return Err(ContractError::InvalidReadingValue);
+    }
+
+    // Get last reading timestamp
+    let last_reading_key = DataKey::LastReadingTime(meter_id);
+    let last_reading_time: u64 = env
+        .storage()
+        .instance()
+        .get(&last_reading_key)
+        .unwrap_or(0);
+
+    // Check for duplicate or old timestamp
+    if timestamp <= last_reading_time {
+        return Err(ContractError::DuplicateTimestamp);
+    }
+
+    // Calculate time elapsed since last reading
+    let elapsed = timestamp - last_reading_time;
+
+    // Get max delta for this resource type
+    let max_delta = get_max_delta(resource_type);
+
+    // Calculate allowed maximum delta, capped at MAX_INTERVAL_MULTIPLIER * max_delta
+    let allowed_intervals = elapsed / STANDARD_INTERVAL;
+    let capped_intervals = allowed_intervals.min(MAX_INTERVAL_MULTIPLIER);
+    let allowed_delta = max_delta * capped_intervals as i128;
+
+    // Check if either watt_hours or units_consumed exceeds allowed delta
+    if watt_hours_consumed > allowed_delta || units_consumed > allowed_delta {
+        return Err(ContractError::ReadingDeltaTooLarge);
+    }
+
+    Ok(())
 }
 
 fn get_meter_or_panic(env: &Env, meter_id: u64) -> Meter {
@@ -4185,6 +4274,7 @@ impl UtilityContract {
         token: Address,
         device_public_key: BytesN<32>,
         priority_index: u32,
+        resource_type: ResourceType,
     ) -> u64 {
         Self::register_meter_with_mode(
             env,
@@ -4195,6 +4285,7 @@ impl UtilityContract {
             BillingType::PrePaid,
             device_public_key,
             priority_index,
+            resource_type,
         )
     }
 
@@ -4207,6 +4298,7 @@ impl UtilityContract {
         device_public_key: BytesN<32>,
         referrer: Address,
         priority_index: u32,
+        resource_type: ResourceType,
     ) -> u64 {
         let meter_id = Self::register_meter(
             env.clone(),
@@ -4216,6 +4308,7 @@ impl UtilityContract {
             token,
             device_public_key,
             priority_index,
+            resource_type,
         );
 
         if referrer != user {
@@ -4468,6 +4561,7 @@ impl UtilityContract {
         billing_type: BillingType,
         device_public_key: BytesN<32>,
         priority_index: u32,
+        resource_type: ResourceType,
     ) -> u64 {
         user.require_auth();
 
@@ -4495,6 +4589,7 @@ impl UtilityContract {
             user,
             provider,
             billing_type,
+            resource_type,
             off_peak_rate,
             peak_rate,
             rate_per_unit: off_peak_rate,
@@ -4751,6 +4846,35 @@ impl UtilityContract {
         validate_ed25519_signature(&signed_data.signature)?;
         validate_ed25519_public_key(&signed_data.public_key)?;
 
+        // Validate reading
+        if let Err(e) = validate_reading(
+            &env,
+            signed_data.meter_id,
+            meter.resource_type,
+            signed_data.watt_hours_consumed,
+            signed_data.units_consumed,
+            signed_data.timestamp,
+        ) {
+            // Emit ReadingRejected event
+            let reason = match e {
+                ContractError::InvalidReadingValue => String::from_str(&env, "Negative reading"),
+                ContractError::DuplicateTimestamp => String::from_str(&env, "Timestamp not after last"),
+                ContractError::ReadingDeltaTooLarge => String::from_str(&env, "Reading too large"),
+                _ => String::from_str(&env, "Unknown validation error"),
+            };
+            let event = ReadingRejected {
+                meter_id: signed_data.meter_id,
+                reason,
+                value: signed_data.units_consumed,
+                timestamp: signed_data.timestamp,
+            };
+            env.events().publish(
+                (Symbol::new(&env, "ReadReject"), signed_data.meter_id),
+                event,
+            );
+            panic_with_error!(&env, e);
+        }
+
         // Verify the signature and pairing
         if let Err(e) = verify_usage_signature(&env, &signed_data, &meter) {
             panic_with_error!(&env, e);
@@ -4947,6 +5071,11 @@ impl UtilityContract {
         // Update provider total pool
         let new_meter_value = provider_meter_value(&meter);
         update_provider_total_pool(&env, &meter.provider, old_meter_value, new_meter_value);
+
+        // Update last reading time
+        env.storage()
+            .instance()
+            .set(&DataKey::LastReadingTime(signed_data.meter_id), &signed_data.timestamp);
 
         env.storage()
             .instance()
@@ -6788,6 +6917,7 @@ impl UtilityContract {
         token: Address,
         device_public_key: BytesN<32>,
         priority_index: u32,
+        resource_type: ResourceType,
     ) -> u64 {
         // Verify caller is a configured Sub-DAO
         let sub_dao = env.current_contract_address();
@@ -6822,6 +6952,7 @@ impl UtilityContract {
             BillingType::PrePaid,
             device_public_key,
             priority_index,
+            resource_type,
         );
 
         // Update spent budget (simplified)

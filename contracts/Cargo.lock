@@ -1671,6 +1671,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "settlement"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 23.5.3",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

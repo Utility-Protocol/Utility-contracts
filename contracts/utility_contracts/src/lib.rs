@@ -1299,6 +1299,7 @@ const STREAM_CREATION_WINDOW_SECONDS: u64 = 3600; // 1 hour window
 const ADMIN_TRANSFER_TIMELOCK: u64 = 48 * HOUR_IN_SECONDS;
 const MIN_FINANCE_WALLETS: u32 = 3;
 const MAX_FINANCE_WALLETS: u32 = 5;
+const MIN_MULTISIG_THRESHOLD: u32 = 2;
 const WITHDRAWAL_REQUEST_EXPIRY: u64 = 7 * DAY_IN_SECONDS;
 
 // Issue #279: Byte array validation constants
@@ -7083,10 +7084,7 @@ impl UtilityContract {
             panic_with_error!(&env, ContractError::InvalidFinanceWalletCount);
         }
 
-        // Validate required signatures
-        if required_signatures == 0 || required_signatures > wallet_count {
-            panic_with_error!(&env, ContractError::InvalidSignatureThreshold);
-        }
+        Self::validate_multisig_config(&env, &finance_wallets, required_signatures);
 
         let config = MultiSigConfig {
             provider: provider.clone(),
@@ -7113,8 +7111,67 @@ impl UtilityContract {
         );
     }
 
+    fn minimum_multisig_threshold(wallet_count: u32) -> u32 {
+        let half_rounded_up = (wallet_count + 1) / 2;
+        if half_rounded_up > MIN_MULTISIG_THRESHOLD {
+            half_rounded_up
+        } else {
+            MIN_MULTISIG_THRESHOLD
+        }
+    }
+
+    fn validate_unique_signers(env: &Env, signers: &Vec<Address>) {
+        for i in 0..signers.len() {
+            let signer = signers.get(i).unwrap();
+            for j in (i + 1)..signers.len() {
+                if signer == signers.get(j).unwrap() {
+                    panic_with_error!(env, ContractError::InvalidFinanceWalletCount);
+                }
+            }
+        }
+    }
+
+    fn validate_multisig_config(env: &Env, signers: &Vec<Address>, required_signatures: u32) {
+        let wallet_count = signers.len();
+        if wallet_count < MIN_FINANCE_WALLETS || wallet_count > MAX_FINANCE_WALLETS {
+            panic_with_error!(env, ContractError::InvalidFinanceWalletCount);
+        }
+
+        Self::validate_unique_signers(env, signers);
+
+        if required_signatures < Self::minimum_multisig_threshold(wallet_count)
+            || required_signatures > wallet_count
+        {
+            panic_with_error!(env, ContractError::InvalidSignatureThreshold);
+        }
+    }
+
+    fn validate_multisig_approvals(
+        env: &Env,
+        provider: &Address,
+        request_id: u64,
+        config: &MultiSigConfig,
+    ) -> u32 {
+        Self::validate_multisig_config(env, &config.finance_wallets, config.required_signatures);
+
+        let mut approval_count = 0u32;
+        for i in 0..config.finance_wallets.len() {
+            let signer = config.finance_wallets.get(i).unwrap();
+            let approval_key = DataKey::WithdrawalApproval(provider.clone(), request_id, signer);
+            if env.storage().instance().has(&approval_key) {
+                approval_count += 1;
+            }
+        }
+
+        if approval_count < config.required_signatures {
+            panic_with_error!(env, ContractError::InsufficientApprovals);
+        }
+
+        approval_count
+    }
+
     /// Update multi-sig configuration for a provider.
-    /// Requires authorization from at least `required_signatures` current finance wallets.
+    /// Requires provider authorization and enforces distinct signer and threshold bounds.
     pub fn update_multisig_config(
         env: Env,
         provider: Address,
@@ -7131,11 +7188,7 @@ impl UtilityContract {
         // Require authorization from the provider
         provider.require_auth();
 
-        // Validate new wallet count
-        let wallet_count = new_finance_wallets.len();
-        if wallet_count < MIN_FINANCE_WALLETS || wallet_count > MAX_FINANCE_WALLETS {
-            panic_with_error!(&env, ContractError::InvalidFinanceWalletCount);
-        }
+        Self::validate_multisig_config(&env, &new_finance_wallets, new_required_signatures);
 
         let updated_config = MultiSigConfig {
             provider: provider.clone(),
@@ -7287,7 +7340,12 @@ impl UtilityContract {
     /// # Arguments
     /// * `provider` - The utility provider address
     /// * `request_id` - The withdrawal request ID to approve
-    pub fn approve_multisig_withdrawal(env: Env, provider: Address, request_id: u64) {
+    pub fn approve_multisig_withdrawal(
+        env: Env,
+        provider: Address,
+        request_id: u64,
+        approver: Address,
+    ) {
         let config: MultiSigConfig = env
             .storage()
             .instance()
@@ -7311,17 +7369,11 @@ impl UtilityContract {
             panic_with_error!(&env, ContractError::WithdrawalRequestExpired);
         }
 
-        // Find and verify the approver is an authorized finance wallet
-        let mut approver: Option<Address> = None;
-        for i in 0..config.finance_wallets.len() {
-            let wallet = config.finance_wallets.get(i).unwrap();
-            wallet.require_auth();
-            approver = Some(wallet);
-            break;
+        if !config.finance_wallets.contains(&approver) {
+            panic_with_error!(&env, ContractError::NotAuthorizedFinanceWallet);
         }
-
-        let actual_approver = approver
-            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotAuthorizedFinanceWallet));
+        approver.require_auth();
+        let actual_approver = approver;
 
         // Check if already approved by this wallet
         let approval_key =
@@ -7378,14 +7430,9 @@ impl UtilityContract {
         if env.ledger().timestamp() > request.expires_at {
             panic_with_error!(&env, ContractError::WithdrawalRequestExpired);
         }
-        if request.approval_count < config.required_signatures {
-            panic_with_error!(&env, ContractError::InsufficientApprovals);
-        }
-
-        // Check sufficient approvals
-        if request.approval_count < config.required_signatures {
-            panic_with_error!(&env, ContractError::InsufficientApprovals);
-        }
+        let verified_approval_count =
+            Self::validate_multisig_approvals(&env, &provider, request_id, &config);
+        request.approval_count = verified_approval_count;
 
         // Get meter and verify
         let mut meter = get_meter_or_panic(&env, request.meter_id);

@@ -443,9 +443,8 @@ pub fn check_velocity_limits(
 ///
 /// `scope` = 0 for global override, or specific meter_id
 /// `expires_at` = 0 for permanent, or Unix timestamp for expiration
+/// NOTE: Caller (lib.rs) must have already verified admin auth against stored AdminAddress.
 pub fn apply_override(env: &Env, admin: Address, scope: u64, expires_at: u64, reason: Symbol) {
-    admin.require_auth();
-
     let now = env.ledger().timestamp();
 
     let override_config = VelocityOverride {
@@ -523,10 +522,8 @@ pub fn get_velocity_config(env: &Env) -> Option<VelocityConfig> {
         .get(&VelocityDataKey::VelocityConfig)
 }
 
-/// Update velocity configuration (admin only)
-pub fn set_velocity_config(env: &Env, admin: Address, config: VelocityConfig) {
-    admin.require_auth();
-
+/// Update velocity configuration (admin only - caller must have verified admin auth)
+pub fn set_velocity_config(env: &Env, _admin: Address, config: VelocityConfig) {
     env.storage()
         .instance()
         .set(&VelocityDataKey::VelocityConfig, &config);

@@ -1454,11 +1454,7 @@ fn validate_reading(
 
     // Get last reading timestamp
     let last_reading_key = DataKey::LastReadingTime(meter_id);
-    let last_reading_time: u64 = env
-        .storage()
-        .instance()
-        .get(&last_reading_key)
-        .unwrap_or(0);
+    let last_reading_time: u64 = env.storage().instance().get(&last_reading_key).unwrap_or(0);
 
     // Check for duplicate or old timestamp
     if timestamp <= last_reading_time {
@@ -3800,6 +3796,11 @@ impl UtilityContract {
         per_stream_limit: i128,
         is_enabled: bool,
     ) {
+        // Verify admin param matches the registered AdminAddress
+        let stored_admin = get_admin_or_panic(&env);
+        if admin != stored_admin {
+            panic_with_error!(&env, ContractError::UnauthorizedAdmin);
+        }
         admin.require_auth();
 
         // Validate limits are positive
@@ -3880,6 +3881,11 @@ impl UtilityContract {
         expires_at: u64,
         reason: Symbol,
     ) {
+        // Verify admin param matches the registered AdminAddress
+        let stored_admin = get_admin_or_panic(&env);
+        if admin != stored_admin {
+            panic_with_error!(&env, ContractError::UnauthorizedAdmin);
+        }
         admin.require_auth();
 
         // Validate expiration time
@@ -3893,7 +3899,7 @@ impl UtilityContract {
             let _meter = get_meter_or_panic(&env, meter_id);
         }
 
-        apply_override(&env, admin, meter_id, expires_at, reason);
+        apply_override(&env, admin.clone(), meter_id, expires_at, reason.clone());
 
         // Emit audit event
         env.events().publish(
@@ -3935,15 +3941,16 @@ impl UtilityContract {
     /// UtilityContract::revoke_velocity_override(env, admin, meter_id);
     /// ```
     pub fn revoke_velocity_override(env: Env, admin: Address, meter_id: u64) {
+        // Verify admin param matches the registered AdminAddress
+        let stored_admin = get_admin_or_panic(&env);
+        if admin != stored_admin {
+            panic_with_error!(&env, ContractError::UnauthorizedAdmin);
+        }
         admin.require_auth();
 
         // Check if override exists before attempting to revoke
         // This prevents unnecessary storage operations and provides better error messages
-        let override_key = if meter_id == 0 {
-            DataKey::VelocityOverrideGlobal
-        } else {
-            DataKey::VelocityOverride(meter_id)
-        };
+        let override_key = velocity_limit::VelocityDataKey::VelocityOverride(meter_id);
 
         if !env.storage().instance().has(&override_key) {
             panic_with_error!(&env, ContractError::InvalidUsageValue);
@@ -4858,7 +4865,9 @@ impl UtilityContract {
             // Emit ReadingRejected event
             let reason = match e {
                 ContractError::InvalidReadingValue => String::from_str(&env, "Negative reading"),
-                ContractError::DuplicateTimestamp => String::from_str(&env, "Timestamp not after last"),
+                ContractError::DuplicateTimestamp => {
+                    String::from_str(&env, "Timestamp not after last")
+                }
                 ContractError::ReadingDeltaTooLarge => String::from_str(&env, "Reading too large"),
                 _ => String::from_str(&env, "Unknown validation error"),
             };
@@ -5073,9 +5082,10 @@ impl UtilityContract {
         update_provider_total_pool(&env, &meter.provider, old_meter_value, new_meter_value);
 
         // Update last reading time
-        env.storage()
-            .instance()
-            .set(&DataKey::LastReadingTime(signed_data.meter_id), &signed_data.timestamp);
+        env.storage().instance().set(
+            &DataKey::LastReadingTime(signed_data.meter_id),
+            &signed_data.timestamp,
+        );
 
         env.storage()
             .instance()

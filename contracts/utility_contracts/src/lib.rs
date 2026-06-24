@@ -1071,6 +1071,104 @@ pub enum DataKey {
     LastReadingTime(u64),
 }
 
+// ============================================================================
+// Namespace prefixes for domain-separated storage keys
+// ============================================================================
+pub const NAMESPACE_COMMON: [u8; 4] = [0x43, 0x4f, 0x4d, 0x4d]; // "COMM"
+pub const NAMESPACE_TARIFF: [u8; 4] = [0x54, 0x41, 0x52, 0x49]; // "TARI"
+pub const NAMESPACE_SETTLEMENT: [u8; 4] = [0x53, 0x45, 0x54, 0x4c]; // "SETL"
+pub const NAMESPACE_RESOURCE: [u8; 4] = [0x52, 0x45, 0x53, 0x4f]; // "RESO"
+
+impl DataKey {
+    pub fn encode(&self, env: &Env) -> Bytes {
+        let prefix = match self {
+            DataKey::TariffOracleAdmin
+            | DataKey::CurrentTariffSchedule
+            | DataKey::TariffScheduleHash
+            | DataKey::TariffUpdateProposal(_)
+            | DataKey::TariffProposalCounter
+            | DataKey::TodayTariffSchedule => &NAMESPACE_TARIFF,
+            _ => &NAMESPACE_COMMON,
+        };
+        let mut key = Bytes::new(env);
+        key.append(&Bytes::from_array(env, prefix));
+        key.append(&self.clone().to_xdr(env));
+        key
+    }
+}
+
+/// Encode a raw key (e.g. u64) with a namespace prefix for domain separation.
+pub fn encode_raw_key(env: &Env, prefix: &[u8; 4], raw: &[u8]) -> Bytes {
+    let mut key = Bytes::new(env);
+    key.append(&Bytes::from_array(env, prefix));
+    key.append(&Bytes::from_slice(env, raw));
+    key
+}
+
+/// Migrate storage entries from legacy (non-prefixed) keys to new namespaced keys.
+/// Handles tariff oracle keys and common singleton keys. Idempotent.
+pub fn migrate_namespace(env: &Env) {
+    // Tariff oracle singleton keys
+    let legacy_admin: Option<Address> = env.storage().persistent().get(&DataKey::TariffOracleAdmin);
+    if let Some(admin) = legacy_admin {
+        let new_key = DataKey::TariffOracleAdmin.encode(env);
+        env.storage().persistent().set(&new_key, &admin);
+        env.storage().persistent().remove(&DataKey::TariffOracleAdmin);
+    }
+
+    let legacy_hash: Option<soroban_sdk::BytesN<32>> = env.storage().persistent().get(&DataKey::TariffScheduleHash);
+    if let Some(hash) = legacy_hash {
+        let new_key = DataKey::TariffScheduleHash.encode(env);
+        env.storage().persistent().set(&new_key, &hash);
+        env.storage().persistent().remove(&DataKey::TariffScheduleHash);
+    }
+
+    let legacy_counter: Option<u64> = env.storage().persistent().get(&DataKey::TariffProposalCounter);
+    if let Some(counter) = legacy_counter {
+        let new_key = DataKey::TariffProposalCounter.encode(env);
+        env.storage().persistent().set(&new_key, &counter);
+        env.storage().persistent().remove(&DataKey::TariffProposalCounter);
+    }
+
+    let legacy_schedule: Option<crate::tariff_oracle::DailyTariffSchedule> =
+        env.storage().persistent().get(&DataKey::CurrentTariffSchedule);
+    if let Some(schedule) = legacy_schedule {
+        let new_key = DataKey::CurrentTariffSchedule.encode(env);
+        env.storage().persistent().set(&new_key, &schedule);
+        env.storage().persistent().remove(&DataKey::CurrentTariffSchedule);
+    }
+
+    let legacy_today: Option<crate::tariff_oracle::DailyTariffSchedule> =
+        env.storage().temporary().get(&DataKey::TodayTariffSchedule);
+    if let Some(schedule) = legacy_today {
+        let new_key = DataKey::TodayTariffSchedule.encode(env);
+        env.storage().temporary().set(&new_key, &schedule);
+        env.storage().temporary().remove(&DataKey::TodayTariffSchedule);
+    }
+
+    // Common singleton keys
+    let keys_to_migrate: &[(DataKey, &dyn Fn(&DataKey) -> bool)] = &[
+        (DataKey::AdminAddress, &|_: &DataKey| true),
+        (DataKey::GridAdministrator, &|_: &DataKey| true),
+        (DataKey::Oracle, &|_: &DataKey| true),
+        (DataKey::ProtocolFeeBps, &|_: &DataKey| true),
+        (DataKey::ProtocolFeeVault, &|_: &DataKey| true),
+        (DataKey::GovernmentVault, &|_: &DataKey| true),
+        (DataKey::NativeToken, &|_: &DataKey| true),
+        (DataKey::ComplianceOfficer, &|_: &DataKey| true),
+        (DataKey::MaintenanceWallet, &|_: &DataKey| true),
+        (DataKey::LegalVault, &|_: &DataKey| true),
+    ];
+    for (variant, _) in keys_to_migrate {
+        let legacy: Option<Address> = env.storage().persistent().get(&variant);
+        if let Some(val) = legacy {
+            let new_key = variant.encode(env);
+            env.storage().persistent().set(&new_key, &val);
+            env.storage().persistent().remove(&variant);
+        }
+    }
+}
+
 #[contracterror(export = false)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]

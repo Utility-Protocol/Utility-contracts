@@ -82,11 +82,7 @@
           "contract_data": {
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
             "key": {
-              "vec": [
-                {
-                  "symbol": "Admin"
-                }
-              ]
+              "bytes": "5245534f0000001000000001000000010000000f0000000541646d696e000000"
             },
             "durability": "persistent"
           }
@@ -99,11 +95,7 @@
                 "ext": "v0",
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
                 "key": {
-                  "vec": [
-                    {
-                      "symbol": "Admin"
-                    }
-                  ]
+                  "bytes": "5245534f0000001000000001000000010000000f0000000541646d696e000000"
                 },
                 "durability": "persistent",
                 "val": {
@@ -121,14 +113,7 @@
           "contract_data": {
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
             "key": {
-              "vec": [
-                {
-                  "symbol": "Nonce"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                }
-              ]
+              "bytes": "5245534f0000001000000001000000020000000f000000054e6f6e636500000000000012000000010000000000000000000000000000000000000000000000000000000000000003"
             },
             "durability": "persistent"
           }
@@ -141,14 +126,7 @@
                 "ext": "v0",
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
                 "key": {
-                  "vec": [
-                    {
-                      "symbol": "Nonce"
-                    },
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                    }
-                  ]
+                  "bytes": "5245534f0000001000000001000000020000000f000000054e6f6e636500000000000012000000010000000000000000000000000000000000000000000000000000000000000003"
                 },
                 "durability": "persistent",
                 "val": {

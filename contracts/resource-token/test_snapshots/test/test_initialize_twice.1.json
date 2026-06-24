@@ -40,11 +40,7 @@
           "contract_data": {
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
             "key": {
-              "vec": [
-                {
-                  "symbol": "Admin"
-                }
-              ]
+              "bytes": "5245534f0000001000000001000000010000000f0000000541646d696e000000"
             },
             "durability": "persistent"
           }
@@ -57,11 +53,7 @@
                 "ext": "v0",
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
                 "key": {
-                  "vec": [
-                    {
-                      "symbol": "Admin"
-                    }
-                  ]
+                  "bytes": "5245534f0000001000000001000000010000000f0000000541646d696e000000"
                 },
                 "durability": "persistent",
                 "val": {
@@ -274,7 +266,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Already initialized' from contract function 'Symbol(obj#25)'"
+                  "string": "caught panic 'Already initialized' from contract function 'Symbol(obj#55)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"

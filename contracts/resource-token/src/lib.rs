@@ -1,20 +1,21 @@
 #![no_std]
+extern crate alloc;
 
-//! Resource Token Contract
-//! 
-//! This contract implements a secure token with mint/burn operations that include
-//! full call chain verification to prevent authorization spoofing attacks.
-//! 
-//! # Security Model
-//! 
-//! The contract authorizes mint/burn operations based on:
-//! 1. Direct admin authorization, OR
-//! 2. Delegated operator authorization with expiration
-//! 
-//! The authorization check validates the full invocation chain to ensure that
-//! a malicious intermediate contract cannot spoof authorization.
+// Resource Token Contract
+// 
+// This contract implements a secure token with mint/burn operations that include
+// full call chain verification to prevent authorization spoofing attacks.
+// 
+// # Security Model
+// 
+// The contract authorizes mint/burn operations based on:
+// 1. Direct admin authorization, OR
+// 2. Delegated operator authorization with expiration
+// 
+// The authorization check validates the full invocation chain to ensure that
+// a malicious intermediate contract cannot spoof authorization.
 
-use soroban_sdk::{contract, contractimpl, Address, Env};
+use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
 
 mod admin;
 mod auth;
@@ -24,9 +25,10 @@ mod storage;
 pub use admin::{get_admin, set_admin};
 pub use auth::{authorize_burn, authorize_mint};
 pub use operators::{authorize_operator, is_valid_operator, revoke_operator};
+use storage as storage_mod;
 pub use storage::{
     get_balance, get_total_supply, set_balance, set_total_supply, MAX_CHAIN_DEPTH,
-    TTL_OPERATOR_DELEGATION,
+    NAMESPACE_PREFIX, TTL_OPERATOR_DELEGATION,
 };
 
 #[contract]
@@ -210,6 +212,12 @@ impl ResourceToken {
     /// * The total supply of tokens
     pub fn total_supply(env: Env) -> i128 {
         get_total_supply(&env)
+    }
+
+    /// Migrate all storage entries from legacy (non-prefixed) keys to new namespaced keys.
+    /// Must be called by the admin after a contract upgrade.
+    pub fn migrate_namespace(env: Env, addresses: Vec<Address>) {
+        storage_mod::migrate_namespace(&env, &addresses);
     }
 }
 

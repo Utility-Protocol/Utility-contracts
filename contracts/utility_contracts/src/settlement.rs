@@ -1,14 +1,20 @@
 use soroban_sdk::{
-    contract, contractimpl, contracterror, panic_with_error, Address, Env,
+    contract, contractimpl, contracterror, panic_with_error, Address, Bytes, Env,
 };
 
 use crate::settlement_types::SettlementProposal;
 use crate::settlement_lock_manager::{lock_resources, release_locked_resources};
+use crate::{encode_raw_key, NAMESPACE_SETTLEMENT};
 
 /// Settlement window bounds: minimum 60 seconds (1 minute)
 pub const MIN_SETTLEMENT_WINDOW: u64 = 60;
 /// Settlement window bounds: maximum 604800 seconds (7 days)
 pub const MAX_SETTLEMENT_WINDOW: u64 = 604800;
+
+/// Encode a settlement storage key with the SETTLEMENT namespace prefix.
+fn settlement_key(env: &Env, raw: &[u8]) -> Bytes {
+    encode_raw_key(env, &NAMESPACE_SETTLEMENT, raw)
+}
 
 /// Settlement error codes
 #[contracterror]
@@ -79,7 +85,8 @@ impl SettlementContract {
         lock_resources(&env, &mut proposal, &token_address);
 
         // Store the proposal
-        env.storage().persistent().set(&proposal_id, &proposal);
+        let skey = settlement_key(&env, &proposal_id.to_be_bytes());
+        env.storage().persistent().set(&skey, &proposal);
 
         proposal
     }
@@ -101,43 +108,38 @@ impl SettlementContract {
         token_address: Address,
     ) {
         // Retrieve the proposal
+        let skey = settlement_key(&env, &proposal_id.to_be_bytes());
         let mut proposal: SettlementProposal = env
             .storage()
             .persistent()
-            .get(&proposal_id)
+            .get(&skey)
             .unwrap_or_else(|| panic_with_error!(&env, SettlementError::ProposalNotFound));
 
         // **CRITICAL DEADLINE CHECK - Must be first operation before any state mutation**
-        // No grace period allowed - strictly enforce the deadline
         let current_timestamp = env.ledger().timestamp();
         if current_timestamp > proposal.settlement_deadline {
-            // Release locked resources before panicking
             release_locked_resources(&env, &mut proposal, &token_address);
             panic_with_error!(&env, SettlementError::DeadlineExceeded);
         }
 
-        // Check if already finalized
         if proposal.finalized {
             panic_with_error!(&env, SettlementError::AlreadyFinalized);
         }
 
-        // Require authorization from payee
         proposal.payee.require_auth();
 
-        // Mark as finalized
         proposal.finalized = true;
 
-        // In a real implementation, transfer tokens here
-        // For now, just release the lock
         release_locked_resources(&env, &mut proposal, &token_address);
 
         // Store the updated proposal
-        env.storage().persistent().set(&proposal_id, &proposal);
+        env.storage().persistent().set(&skey, &proposal);
     }
 
     /// Get a settlement proposal by ID
     pub fn get_proposal(env: Env, proposal_id: u64) -> Option<SettlementProposal> {
-        env.storage().persistent().get(&proposal_id)
+        let skey = settlement_key(&env, &proposal_id.to_be_bytes());
+        env.storage().persistent().get(&skey)
     }
 
     /// Check if a proposal deadline has passed

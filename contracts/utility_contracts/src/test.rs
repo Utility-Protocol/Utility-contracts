@@ -1012,3 +1012,89 @@ fn test_event_emissions() {
     // Note: In a real test environment, you would verify the events were emitted
     // This test ensures the functions execute without panicking when events are published
 }
+
+// ============================================================================
+// Issue #26 — Protocol-Pause Bypass via Admin-Whitelist Collision
+// ============================================================================
+
+#[test]
+fn test_configure_velocity_limits_rejects_non_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(UtilityContract, ());
+    let client = UtilityContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let attacker = Address::generate(&env);
+    // attacker passes themselves as admin param — must be rejected
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_velocity_limit_config(&attacker, &1_000_000i128, &100_000i128, &true);
+    }));
+    assert!(result.is_err(), "non-admin should not be able to configure velocity limits");
+}
+
+#[test]
+fn test_configure_velocity_limits_succeeds_for_real_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(UtilityContract, ());
+    let client = UtilityContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    client.set_velocity_limit_config(&admin, &1_000_000i128, &100_000i128, &true);
+    let config = client.get_velocity_limits().unwrap();
+    assert_eq!(config.global_limit, 1_000_000);
+    assert_eq!(config.per_stream_limit, 100_000);
+    assert!(config.is_enabled);
+}
+
+#[test]
+fn test_apply_velocity_override_rejects_non_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(UtilityContract, ());
+    let client = UtilityContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    let attacker = Address::generate(&env);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.apply_velocity_override(&attacker, &0u64, &0u64, &soroban_sdk::symbol_short!("test"));
+    }));
+    assert!(result.is_err(), "non-admin should not be able to apply velocity override");
+}
+
+#[test]
+fn test_apply_and_revoke_velocity_override_by_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(UtilityContract, ());
+    let client = UtilityContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    // Admin applies a global override (meter_id = 0), then revokes it
+    client.apply_velocity_override(&admin, &0u64, &0u64, &soroban_sdk::symbol_short!("maint"));
+    client.revoke_velocity_override(&admin, &0u64);
+}
+
+#[test]
+fn test_revoke_velocity_override_rejects_non_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(UtilityContract, ());
+    let client = UtilityContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.set_admin(&admin);
+
+    // Admin applies override first so it exists
+    client.apply_velocity_override(&admin, &0u64, &0u64, &soroban_sdk::symbol_short!("maint"));
+
+    let attacker = Address::generate(&env);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.revoke_velocity_override(&attacker, &0u64);
+    }));
+    assert!(result.is_err(), "non-admin should not be able to revoke velocity override");
+}

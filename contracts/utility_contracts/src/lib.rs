@@ -1088,6 +1088,8 @@ pub enum DataKey {
     LastReadingTime(u64),
     // Pending settlement
     PendingSettlement(Address, BytesN<32>),
+    // Batch finalization idempotency guard
+    BatchFinalized(u64),
 }
 
 // ============================================================================

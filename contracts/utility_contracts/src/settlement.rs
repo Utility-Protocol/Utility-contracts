@@ -4,7 +4,7 @@ use soroban_sdk::{
 
 use crate::settlement_types::SettlementProposal;
 use crate::settlement_lock_manager::{lock_resources, release_locked_resources};
-use crate::{encode_raw_key, NAMESPACE_SETTLEMENT};
+use crate::{encode_raw_key, DataKey, NAMESPACE_SETTLEMENT};
 
 /// Settlement window bounds: minimum 60 seconds (1 minute)
 pub const MIN_SETTLEMENT_WINDOW: u64 = 60;
@@ -107,6 +107,12 @@ impl SettlementContract {
         proposal_id: u64,
         token_address: Address,
     ) {
+        // IDEMPOTENCY GUARD — check BEFORE any state mutation
+        if env.storage().instance().has(&DataKey::BatchFinalized(proposal_id)) {
+            panic_with_error!(&env, SettlementError::AlreadyFinalized);
+        }
+        env.storage().instance().set(&DataKey::BatchFinalized(proposal_id), &true);
+
         // Retrieve the proposal
         let skey = settlement_key(&env, &proposal_id.to_be_bytes());
         let mut proposal: SettlementProposal = env
@@ -115,7 +121,7 @@ impl SettlementContract {
             .get(&skey)
             .unwrap_or_else(|| panic_with_error!(&env, SettlementError::ProposalNotFound));
 
-        // **CRITICAL DEADLINE CHECK - Must be first operation before any state mutation**
+        // Deadline check — the BatchFinalized flag remains true even if we panic here
         let current_timestamp = env.ledger().timestamp();
         if current_timestamp > proposal.settlement_deadline {
             release_locked_resources(&env, &mut proposal, &token_address);
@@ -360,5 +366,88 @@ mod test {
 
         // Try to finalize again - should panic with AlreadyFinalized error (code 4)
         client.finalize_settlement(&7, &token);
+    }
+
+    #[test]
+    fn test_double_finalization_via_independent_flag() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, SettlementContract);
+        let client = SettlementContractClient::new(&env, &contract_id);
+
+        let payer = Address::generate(&env);
+        let payee = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        env.ledger().with_mut(|li| {
+            li.timestamp = 1000;
+        });
+
+        // Create and finalize proposal (all good)
+        client.propose_settlement(&8, &payer, &payee, &1000, &100, &300, &token);
+        client.finalize_settlement(&8, &token);
+
+        // Manually reset proposal.finalized to false in storage (simulating corruption)
+        // to prove the independent BatchFinalized flag blocks re-finalization
+        let proposal_key = settlement_key(&env, &8u64.to_be_bytes());
+        env.as_contract(&contract_id, || {
+            let mut p: SettlementProposal = env.storage().persistent().get(&proposal_key).unwrap();
+            p.finalized = false;
+            env.storage().persistent().set(&proposal_key, &p);
+        });
+
+        // Should still fail because the BatchFinalized flag is independently set
+        let result = std::panic::catch_unwind(|| {
+            client.finalize_settlement(&8, &token);
+        });
+        assert!(
+            result.is_err(),
+            "Re-finalization should be blocked by independent BatchFinalized flag"
+        );
+    }
+
+    #[test]
+    fn test_partial_execution_after_deadline_blocks_retry() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, SettlementContract);
+        let client = SettlementContractClient::new(&env, &contract_id);
+
+        let payer = Address::generate(&env);
+        let payee = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        env.ledger().with_mut(|li| {
+            li.timestamp = 1000;
+        });
+
+        client.propose_settlement(&9, &payer, &payee, &1000, &100, &300, &token);
+
+        // Move past deadline (deadline = 1300)
+        env.ledger().with_mut(|li| {
+            li.timestamp = 1400;
+        });
+
+        // First attempt: BatchFinalized flag is set, then DeadlineExceeded panic
+        let result = std::panic::catch_unwind(|| {
+            client.finalize_settlement(&9, &token);
+        });
+        assert!(result.is_err(), "Finalization past deadline should fail");
+
+        // Move back within deadline
+        env.ledger().with_mut(|li| {
+            li.timestamp = 1200;
+        });
+
+        // Second attempt: should fail with AlreadyFinalized (flag from first attempt)
+        let result = std::panic::catch_unwind(|| {
+            client.finalize_settlement(&9, &token);
+        });
+        assert!(
+            result.is_err(),
+            "Retry after partial-execution deadline failure should be blocked"
+        );
     }
 }

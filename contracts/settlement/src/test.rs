@@ -1,3 +1,5 @@
+extern crate std;
+
 use crate::{
     constants::{BPS_DENOMINATOR, MAX_FEE_RATE_BPS, MAX_SETTLEMENT, MIN_FEE_RATE_BPS},
     fees::compute_fee,
@@ -75,22 +77,18 @@ fn test_micro_settlement_extraction_prevention() {
     let rate_bps = 100;
     let micro_amount: i128 = 1;
 
-    // Round-half-up: fee = 0 when rate_bps < 5000
     let per_txn_fee = compute_fee(micro_amount, rate_bps);
     assert_eq!(
         per_txn_fee, 0,
         "Micro-settlement fee should be 0 for rate_bps < 5000"
     );
 
-    // With rate_bps >= 5000, round-half-up rounds up to 1
     let micro_fee_higher_rate = compute_fee(micro_amount, 5001);
     assert_eq!(
         micro_fee_higher_rate, 1,
         "Round-half-up should round 5001/10000 = 1 for micro amount"
     );
 
-    // Under truncation: 1M micro-txns at rate_bps=100 yields 0 total fee
-    // Under round-half-up: still 0 (correct — each fee < 0.5 rounds to 0)
     let num_txns: i128 = 1_000_000;
     let mut total_truncation_style: i128 = 0;
     for _ in 0..num_txns {
@@ -98,15 +96,12 @@ fn test_micro_settlement_extraction_prevention() {
     }
     assert_eq!(total_truncation_style, 0);
 
-    // At rate 5001, each micro-txn yields fee=1 (rounds up at >= 0.5001)
     let mut total_at_5001: i128 = 0;
     for _ in 0..num_txns {
         total_at_5001 += compute_fee(micro_amount, 5001);
     }
     assert_eq!(total_at_5001, num_txns);
 
-    // Each micro-tx at rate=5001 has ~0.4999 excess rounding (0.5001→1.0).
-    // Cumulative error across N txns is bounded by N * 5000 in scaled units.
     let lump_sum = compute_fee(num_txns * micro_amount, 5001);
     let diff = (total_at_5001 - lump_sum).abs();
     let max_per_txn_error = 5000i128;
@@ -120,7 +115,6 @@ fn test_micro_settlement_extraction_prevention() {
         lump_sum
     );
 
-    // Verify each individual fee satisfies the round-half-up invariant
     assert!(verify_fee_invariant(micro_amount, 5001, micro_fee_higher_rate));
 }
 
@@ -159,7 +153,6 @@ fn test_zero_and_edge_inputs() {
 
 #[test]
 fn test_randomized_properties() {
-    // Exhaustive check over small domain to verify round-half-up invariants
     for amount in 1..=1000 {
         for rate_bps in 1..=100 {
             let fee = compute_fee(amount, rate_bps);
@@ -172,4 +165,188 @@ fn test_randomized_properties() {
             );
         }
     }
+}
+
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
+
+use crate::constants::DECIMAL_DENOMINATOR;
+use crate::types::SettlementArgs;
+use crate::{SettlementContract, SettlementContractClient};
+
+#[contracttype]
+#[derive(Clone)]
+enum OracleDataKey {
+    Price,
+}
+
+#[contract]
+struct MockOracle;
+
+#[contractimpl]
+impl MockOracle {
+    pub fn initialize(env: Env, _admin: Address, _updater: Address, initial_price: i128, _decimals: u32) {
+        env.storage().instance().set(&OracleDataKey::Price, &initial_price);
+    }
+
+    pub fn get_price_value(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&OracleDataKey::Price)
+            .unwrap_or(0)
+    }
+}
+
+fn setup_env() -> (Env, Address, Address, Address, Address, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let payer = Address::generate(&env);
+    let payee = Address::generate(&env);
+    let fee_collector = Address::generate(&env);
+
+    let oracle_id = env.register(MockOracle, ());
+    let oracle_mock_client = MockOracleClient::new(&env, &oracle_id);
+    oracle_mock_client.initialize(&admin, &admin, &100_000_0000i128, &7);
+
+    (env, oracle_id, admin, payer, payee, fee_collector)
+}
+
+fn setup_token(env: &Env, payer: &Address, balance: i128) -> Address {
+    let token = env.register_stellar_asset_contract_v2(payer.clone());
+    let token_addr = token.address();
+    let admin_client = token::StellarAssetClient::new(env, &token_addr);
+    admin_client.mint(payer, &balance);
+    token_addr
+}
+
+fn settlement_amount(volume: i128, rate: i128) -> i128 {
+    volume * rate / DECIMAL_DENOMINATOR
+}
+
+fn setup_settlement(env: &Env) -> Address {
+    env.register(SettlementContract, ())
+}
+
+fn make_args(
+    token_address: Address,
+    volume: i128,
+    recipient: Address,
+    min_expected_amount: Option<i128>,
+) -> SettlementArgs {
+    SettlementArgs {
+        token_address,
+        volume,
+        recipient,
+        min_expected_amount,
+    }
+}
+
+#[test]
+fn test_zero_slippage_succeeds() {
+    let (env, oracle_id, _admin, payer, payee, fee_collector) = setup_env();
+    let settlement_id = setup_settlement(&env);
+    let settlement_client = SettlementContractClient::new(&env, &settlement_id);
+
+    let rate = 100_000_0000i128;
+    let volume = 1_000_0000i128;
+    let expected_amount = settlement_amount(volume, rate);
+    let token_id = setup_token(&env, &payer, expected_amount);
+
+    let args = make_args(token_id, volume, payee.clone(), None);
+
+    let result = settlement_client.finalize_settlement(
+        &oracle_id,
+        &payer,
+        &fee_collector,
+        &args,
+        &100u32,
+    );
+
+    assert!(result.net_amount > 0);
+    assert_eq!(result.rate_used, rate);
+}
+
+#[test]
+fn test_slippage_within_tolerance_succeeds() {
+    let (env, oracle_id, _admin, payer, payee, fee_collector) = setup_env();
+    let settlement_id = setup_settlement(&env);
+    let settlement_client = SettlementContractClient::new(&env, &settlement_id);
+
+    let rate = 100_000_0000i128;
+    let volume = 1_000_0000i128;
+    let expected_amount = settlement_amount(volume, rate);
+    let token_id = setup_token(&env, &payer, expected_amount);
+
+    let min_expected = expected_amount * 99 / 100;
+
+    let args = make_args(token_id, volume, payee.clone(), Some(min_expected));
+
+    let result = settlement_client.finalize_settlement(
+        &oracle_id,
+        &payer,
+        &fee_collector,
+        &args,
+        &100u32,
+    );
+
+    assert!(result.net_amount > 0);
+    assert_eq!(result.rate_used, rate);
+}
+
+#[test]
+fn test_slippage_exceeds_tolerance_fails() {
+    let (env, oracle_id, _admin, payer, payee, fee_collector) = setup_env();
+    let settlement_id = setup_settlement(&env);
+    let settlement_client = SettlementContractClient::new(&env, &settlement_id);
+
+    let rate = 100_000_0000i128;
+    let volume = 1_000_0000i128;
+    let expected_amount = settlement_amount(volume, rate);
+    let token_id = setup_token(&env, &payer, expected_amount);
+
+    let min_expected = expected_amount + 1;
+
+    let args = make_args(token_id, volume, payee.clone(), Some(min_expected));
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        settlement_client.finalize_settlement(
+            &oracle_id,
+            &payer,
+            &fee_collector,
+            &args,
+            &100u32,
+        );
+    }));
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_user_min_expected_amount_higher_than_actual_fails() {
+    let (env, oracle_id, _admin, payer, payee, fee_collector) = setup_env();
+    let settlement_id = setup_settlement(&env);
+    let settlement_client = SettlementContractClient::new(&env, &settlement_id);
+
+    let rate = 100_000_0000i128;
+    let volume = 1_000_0000i128;
+    let expected_amount = settlement_amount(volume, rate);
+    let token_id = setup_token(&env, &payer, expected_amount);
+
+    let min_expected = expected_amount * 200;
+
+    let args = make_args(token_id, volume, payee.clone(), Some(min_expected));
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        settlement_client.finalize_settlement(
+            &oracle_id,
+            &payer,
+            &fee_collector,
+            &args,
+            &100u32,
+        );
+    }));
+
+    assert!(result.is_err());
 }

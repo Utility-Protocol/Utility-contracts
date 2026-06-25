@@ -322,6 +322,9 @@ pub mod ghost_sweeper;
 pub mod grant_stream_listener;
 pub mod nonce_sync;
 pub mod secure_call_interface;
+pub mod settlement;
+pub mod settlement_lock_manager;
+pub mod settlement_types;
 pub mod tariff_oracle;
 pub mod temporary_storage;
 pub mod velocity_limit;
@@ -436,6 +439,23 @@ pub struct ClaimSettlement {
     pub tax_amount: i128,
     pub protocol_fee: i128,
     pub reseller_payout: i128,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct DeliveryFailure {
+    pub batch_id: BytesN<32>,
+    pub user: Address,
+    pub amount: i128,
+    pub reason: String,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct PendingSettlement {
+    pub amount: i128,
+    pub token: Address,
+    pub expires_at: u64,
 }
 
 #[contracttype]
@@ -1066,9 +1086,106 @@ pub enum DataKey {
     ActiveUpgradeProposalId,
     // Meter reading validation
     LastReadingTime(u64),
-    // Storage Versioning
-    StorageVersion,
-    MigrationCursor,
+    // Pending settlement
+    PendingSettlement(Address, BytesN<32>),
+}
+
+// ============================================================================
+// Namespace prefixes for domain-separated storage keys
+// ============================================================================
+pub const NAMESPACE_COMMON: [u8; 4] = [0x43, 0x4f, 0x4d, 0x4d]; // "COMM"
+pub const NAMESPACE_TARIFF: [u8; 4] = [0x54, 0x41, 0x52, 0x49]; // "TARI"
+pub const NAMESPACE_SETTLEMENT: [u8; 4] = [0x53, 0x45, 0x54, 0x4c]; // "SETL"
+pub const NAMESPACE_RESOURCE: [u8; 4] = [0x52, 0x45, 0x53, 0x4f]; // "RESO"
+
+impl DataKey {
+    pub fn encode(&self, env: &Env) -> Bytes {
+        let prefix = match self {
+            DataKey::TariffOracleAdmin
+            | DataKey::CurrentTariffSchedule
+            | DataKey::TariffScheduleHash
+            | DataKey::TariffUpdateProposal(_)
+            | DataKey::TariffProposalCounter
+            | DataKey::TodayTariffSchedule => &NAMESPACE_TARIFF,
+            _ => &NAMESPACE_COMMON,
+        };
+        let mut key = Bytes::new(env);
+        key.append(&Bytes::from_array(env, prefix));
+        key.append(&self.clone().to_xdr(env));
+        key
+    }
+}
+
+/// Encode a raw key (e.g. u64) with a namespace prefix for domain separation.
+pub fn encode_raw_key(env: &Env, prefix: &[u8; 4], raw: &[u8]) -> Bytes {
+    let mut key = Bytes::new(env);
+    key.append(&Bytes::from_array(env, prefix));
+    key.append(&Bytes::from_slice(env, raw));
+    key
+}
+
+/// Migrate storage entries from legacy (non-prefixed) keys to new namespaced keys.
+/// Handles tariff oracle keys and common singleton keys. Idempotent.
+pub fn migrate_namespace(env: &Env) {
+    // Tariff oracle singleton keys
+    let legacy_admin: Option<Address> = env.storage().persistent().get(&DataKey::TariffOracleAdmin);
+    if let Some(admin) = legacy_admin {
+        let new_key = DataKey::TariffOracleAdmin.encode(env);
+        env.storage().persistent().set(&new_key, &admin);
+        env.storage().persistent().remove(&DataKey::TariffOracleAdmin);
+    }
+
+    let legacy_hash: Option<soroban_sdk::BytesN<32>> = env.storage().persistent().get(&DataKey::TariffScheduleHash);
+    if let Some(hash) = legacy_hash {
+        let new_key = DataKey::TariffScheduleHash.encode(env);
+        env.storage().persistent().set(&new_key, &hash);
+        env.storage().persistent().remove(&DataKey::TariffScheduleHash);
+    }
+
+    let legacy_counter: Option<u64> = env.storage().persistent().get(&DataKey::TariffProposalCounter);
+    if let Some(counter) = legacy_counter {
+        let new_key = DataKey::TariffProposalCounter.encode(env);
+        env.storage().persistent().set(&new_key, &counter);
+        env.storage().persistent().remove(&DataKey::TariffProposalCounter);
+    }
+
+    let legacy_schedule: Option<crate::tariff_oracle::DailyTariffSchedule> =
+        env.storage().persistent().get(&DataKey::CurrentTariffSchedule);
+    if let Some(schedule) = legacy_schedule {
+        let new_key = DataKey::CurrentTariffSchedule.encode(env);
+        env.storage().persistent().set(&new_key, &schedule);
+        env.storage().persistent().remove(&DataKey::CurrentTariffSchedule);
+    }
+
+    let legacy_today: Option<crate::tariff_oracle::DailyTariffSchedule> =
+        env.storage().temporary().get(&DataKey::TodayTariffSchedule);
+    if let Some(schedule) = legacy_today {
+        let new_key = DataKey::TodayTariffSchedule.encode(env);
+        env.storage().temporary().set(&new_key, &schedule);
+        env.storage().temporary().remove(&DataKey::TodayTariffSchedule);
+    }
+
+    // Common singleton keys
+    let keys_to_migrate: &[(DataKey, &dyn Fn(&DataKey) -> bool)] = &[
+        (DataKey::AdminAddress, &|_: &DataKey| true),
+        (DataKey::GridAdministrator, &|_: &DataKey| true),
+        (DataKey::Oracle, &|_: &DataKey| true),
+        (DataKey::ProtocolFeeBps, &|_: &DataKey| true),
+        (DataKey::ProtocolFeeVault, &|_: &DataKey| true),
+        (DataKey::GovernmentVault, &|_: &DataKey| true),
+        (DataKey::NativeToken, &|_: &DataKey| true),
+        (DataKey::ComplianceOfficer, &|_: &DataKey| true),
+        (DataKey::MaintenanceWallet, &|_: &DataKey| true),
+        (DataKey::LegalVault, &|_: &DataKey| true),
+    ];
+    for (variant, _) in keys_to_migrate {
+        let legacy: Option<Address> = env.storage().persistent().get(&variant);
+        if let Some(val) = legacy {
+            let new_key = variant.encode(env);
+            env.storage().persistent().set(&new_key, &val);
+            env.storage().persistent().remove(&variant);
+        }
+    }
 }
 
 #[contracterror(export = false)]
@@ -1313,6 +1430,7 @@ const STREAM_CREATION_WINDOW_SECONDS: u64 = 3600; // 1 hour window
 const ADMIN_TRANSFER_TIMELOCK: u64 = 48 * HOUR_IN_SECONDS;
 const MIN_FINANCE_WALLETS: u32 = 3;
 const MAX_FINANCE_WALLETS: u32 = 5;
+const MIN_MULTISIG_THRESHOLD: u32 = 2;
 const WITHDRAWAL_REQUEST_EXPIRY: u64 = 7 * DAY_IN_SECONDS;
 
 // Issue #279: Byte array validation constants
@@ -1338,6 +1456,10 @@ const MAX_ELECTRICITY_DELTA: i128 = 100 * 1_000_000_00; // 100 kWh per 5-min int
 const MAX_GAS_DELTA: i128 = 50 * 1_000_000_00; // 50 m³ per 5-min interval
 const MAX_WATER_DELTA: i128 = 200 * 1_000_000_00; // 200 L per 5-min interval
 const MAX_HEAT_DELTA: i128 = 100 * 1_000_000_00; // 100 units per 5-min interval
+
+// Pending settlement constants
+const PENDING_CLAIM_TTL: u64 = 30 * 86400; // 30 days
+const MAX_PENDING: usize = 10; // Max pending failures per batch
 
 /// Validate Ed25519 public key byte array
 /// Ensures correct length and non-zero values
@@ -1495,6 +1617,68 @@ fn validate_reading(
     }
 
     Ok(())
+}
+
+/// Check if a trustline is open for a token and user
+/// Attempts to get the user's balance - if it fails, trustline is closed
+fn is_trustline_open(env: &Env, token: &Address, user: &Address) -> bool {
+    let client = token::Client::new(env, token);
+    // Try to get balance - if it panics (trustline closed), return false
+    let result = soroban_sdk::Env::try_invoke_contract::<_, i128>(
+        env,
+        token,
+        &soroban_sdk::symbol_short!("balance"),
+        (user,),
+    );
+    result.is_ok()
+}
+
+/// Store a pending settlement for later claim
+fn store_pending_settlement(
+    env: &Env,
+    user: &Address,
+    batch_id: BytesN<32>,
+    amount: i128,
+    token: &Address,
+) {
+    let now = env.ledger().timestamp();
+    let pending = PendingSettlement {
+        amount,
+        token: token.clone(),
+        expires_at: now + PENDING_CLAIM_TTL,
+    };
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingSettlement(user.clone(), batch_id), &pending);
+}
+
+/// Try to transfer tokens; if trustline is closed, store pending
+fn try_transfer_or_store_pending(
+    env: &Env,
+    token: &Address,
+    from: &Address,
+    to: &Address,
+    amount: i128,
+    batch_id: BytesN<32>,
+) -> bool {
+    if is_trustline_open(env, token, to) {
+        transfer_tokens(env, token, from, to, &amount);
+        true
+    } else {
+        let reason = String::from_str(env, "Trustline closed");
+        let event = DeliveryFailure {
+            batch_id: batch_id.clone(),
+            user: to.clone(),
+            amount,
+            reason,
+        };
+        env.events().publish(
+            (soroban_sdk::symbol_short!("DeliveryFail"), to.clone(), batch_id),
+            event,
+        );
+        store_pending_settlement(env, to, batch_id, amount, token);
+        false
+    }
 }
 
 fn get_meter_or_panic(env: &Env, meter_id: u64) -> Meter {
@@ -7330,10 +7514,7 @@ impl UtilityContract {
             panic_with_error!(&env, ContractError::InvalidFinanceWalletCount);
         }
 
-        // Validate required signatures
-        if required_signatures == 0 || required_signatures > wallet_count {
-            panic_with_error!(&env, ContractError::InvalidSignatureThreshold);
-        }
+        Self::validate_multisig_config(&env, &finance_wallets, required_signatures);
 
         let config = MultiSigConfig {
             provider: provider.clone(),
@@ -7360,8 +7541,67 @@ impl UtilityContract {
         );
     }
 
+    fn minimum_multisig_threshold(wallet_count: u32) -> u32 {
+        let half_rounded_up = (wallet_count + 1) / 2;
+        if half_rounded_up > MIN_MULTISIG_THRESHOLD {
+            half_rounded_up
+        } else {
+            MIN_MULTISIG_THRESHOLD
+        }
+    }
+
+    fn validate_unique_signers(env: &Env, signers: &Vec<Address>) {
+        for i in 0..signers.len() {
+            let signer = signers.get(i).unwrap();
+            for j in (i + 1)..signers.len() {
+                if signer == signers.get(j).unwrap() {
+                    panic_with_error!(env, ContractError::InvalidFinanceWalletCount);
+                }
+            }
+        }
+    }
+
+    fn validate_multisig_config(env: &Env, signers: &Vec<Address>, required_signatures: u32) {
+        let wallet_count = signers.len();
+        if wallet_count < MIN_FINANCE_WALLETS || wallet_count > MAX_FINANCE_WALLETS {
+            panic_with_error!(env, ContractError::InvalidFinanceWalletCount);
+        }
+
+        Self::validate_unique_signers(env, signers);
+
+        if required_signatures < Self::minimum_multisig_threshold(wallet_count)
+            || required_signatures > wallet_count
+        {
+            panic_with_error!(env, ContractError::InvalidSignatureThreshold);
+        }
+    }
+
+    fn validate_multisig_approvals(
+        env: &Env,
+        provider: &Address,
+        request_id: u64,
+        config: &MultiSigConfig,
+    ) -> u32 {
+        Self::validate_multisig_config(env, &config.finance_wallets, config.required_signatures);
+
+        let mut approval_count = 0u32;
+        for i in 0..config.finance_wallets.len() {
+            let signer = config.finance_wallets.get(i).unwrap();
+            let approval_key = DataKey::WithdrawalApproval(provider.clone(), request_id, signer);
+            if env.storage().instance().has(&approval_key) {
+                approval_count += 1;
+            }
+        }
+
+        if approval_count < config.required_signatures {
+            panic_with_error!(env, ContractError::InsufficientApprovals);
+        }
+
+        approval_count
+    }
+
     /// Update multi-sig configuration for a provider.
-    /// Requires authorization from at least `required_signatures` current finance wallets.
+    /// Requires provider authorization and enforces distinct signer and threshold bounds.
     pub fn update_multisig_config(
         env: Env,
         provider: Address,
@@ -7378,11 +7618,7 @@ impl UtilityContract {
         // Require authorization from the provider
         provider.require_auth();
 
-        // Validate new wallet count
-        let wallet_count = new_finance_wallets.len();
-        if wallet_count < MIN_FINANCE_WALLETS || wallet_count > MAX_FINANCE_WALLETS {
-            panic_with_error!(&env, ContractError::InvalidFinanceWalletCount);
-        }
+        Self::validate_multisig_config(&env, &new_finance_wallets, new_required_signatures);
 
         let updated_config = MultiSigConfig {
             provider: provider.clone(),
@@ -7534,7 +7770,12 @@ impl UtilityContract {
     /// # Arguments
     /// * `provider` - The utility provider address
     /// * `request_id` - The withdrawal request ID to approve
-    pub fn approve_multisig_withdrawal(env: Env, provider: Address, request_id: u64) {
+    pub fn approve_multisig_withdrawal(
+        env: Env,
+        provider: Address,
+        request_id: u64,
+        approver: Address,
+    ) {
         let config: MultiSigConfig = env
             .storage()
             .instance()
@@ -7558,17 +7799,11 @@ impl UtilityContract {
             panic_with_error!(&env, ContractError::WithdrawalRequestExpired);
         }
 
-        // Find and verify the approver is an authorized finance wallet
-        let mut approver: Option<Address> = None;
-        for i in 0..config.finance_wallets.len() {
-            let wallet = config.finance_wallets.get(i).unwrap();
-            wallet.require_auth();
-            approver = Some(wallet);
-            break;
+        if !config.finance_wallets.contains(&approver) {
+            panic_with_error!(&env, ContractError::NotAuthorizedFinanceWallet);
         }
-
-        let actual_approver = approver
-            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotAuthorizedFinanceWallet));
+        approver.require_auth();
+        let actual_approver = approver;
 
         // Check if already approved by this wallet
         let approval_key =
@@ -7625,14 +7860,9 @@ impl UtilityContract {
         if env.ledger().timestamp() > request.expires_at {
             panic_with_error!(&env, ContractError::WithdrawalRequestExpired);
         }
-        if request.approval_count < config.required_signatures {
-            panic_with_error!(&env, ContractError::InsufficientApprovals);
-        }
-
-        // Check sufficient approvals
-        if request.approval_count < config.required_signatures {
-            panic_with_error!(&env, ContractError::InsufficientApprovals);
-        }
+        let verified_approval_count =
+            Self::validate_multisig_approvals(&env, &provider, request_id, &config);
+        request.approval_count = verified_approval_count;
 
         // Get meter and verify
         let mut meter = get_meter_or_panic(&env, request.meter_id);
@@ -8578,6 +8808,48 @@ fn attempt_partial_routing(env: &Env, amount: i128) -> Result<i128, ContractErro
 }
 
 impl UtilityContract {
+    // --- Claim pending settlement ---
+    pub fn claim_pending(env: Env, user: Address, batch_id: BytesN<32>) {
+        user.require_auth();
+
+        let now = env.ledger().timestamp();
+        let key = DataKey::PendingSettlement(user.clone(), batch_id);
+        let pending: Option<PendingSettlement> = env.storage().instance().get(&key);
+
+        match pending {
+            None => {
+                // No pending settlement, do nothing
+            },
+            Some(p) => {
+                if now > p.expires_at {
+                    // Expired: forfeit to protocol treasury
+                    if let Some(treasury) = env
+                        .storage()
+                        .instance()
+                        .get::<_, Address>(&DataKey::MaintenanceWallet)
+                    {
+                        transfer_tokens(&env, &p.token, &env.current_contract_address(), &treasury, &p.amount);
+                    }
+                    // Remove expired pending
+                    env.storage().instance().remove(&key);
+                } else {
+                    // Check if trustline is now open
+                    if is_trustline_open(&env, &p.token, &user) {
+                        transfer_tokens(&env, &p.token, &env.current_contract_address(), &user, &p.amount);
+                        env.storage().instance().remove(&key);
+                    } else {
+                        // Still closed, update expiry
+                        let new_pending = PendingSettlement {
+                            expires_at: now + PENDING_CLAIM_TTL,
+                            ..p
+                        };
+                        env.storage().instance().set(&key, &new_pending);
+                    }
+                }
+            }
+        }
+    }
+
     // --- Issues #248–#251 (enterprise) thin entrypoints ---
     pub fn set_provider_fleet_cap(env: Env, provider: Address, new_cap: i128, authority: Address) {
         crate::enterprise::set_fleet_cap_super_admin(&env, provider, new_cap, authority);

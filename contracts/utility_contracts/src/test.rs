@@ -439,13 +439,95 @@ fn test_multisig_withdrawal_full_flow() {
     let withdrawal_amount: i128 = 150_000_00;
     let request_id = client.propose_multisig_withdrawal(&provider, &meter_id, &withdrawal_amount, &treasury);
 
-    // Approvals
-    client.approve_multisig_withdrawal(&provider, &request_id);
-    client.approve_multisig_withdrawal(&provider, &request_id);
+    // Approvals from distinct finance wallets. The proposer implicitly approved as wallet 0.
+    let approver_1 = finance_wallets.get(1).unwrap();
+    let approver_2 = finance_wallets.get(2).unwrap();
+    client.approve_multisig_withdrawal(&provider, &request_id, &approver_1);
+    client.approve_multisig_withdrawal(&provider, &request_id, &approver_2);
 
     client.execute_multisig_withdrawal(&provider, &request_id);
     let request = client.get_withdrawal_request(&provider, &request_id);
     assert!(request.is_executed);
+}
+
+#[test]
+fn test_multisig_rejects_duplicate_approval() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(UtilityContract, ());
+    let client = UtilityContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let provider = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let token_address = create_token(&env);
+
+    let mut finance_wallets = Vec::new(&env);
+    for _ in 0..3 {
+        finance_wallets.push_back(Address::generate(&env));
+    }
+
+    let meter_id = client.register_meter(&user, &provider, &100, &token_address, &device_key(&env, 1), &0, &0);
+    client.configure_multisig_withdrawal(&provider, &finance_wallets, &2, &100_000_00);
+    let request_id = client.propose_multisig_withdrawal(&provider, &meter_id, &150_000_00, &treasury);
+
+    let approver = finance_wallets.get(1).unwrap();
+    client.approve_multisig_withdrawal(&provider, &request_id, &approver);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.approve_multisig_withdrawal(&provider, &request_id, &approver);
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_multisig_rejects_non_signer_approval() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(UtilityContract, ());
+    let client = UtilityContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let provider = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let token_address = create_token(&env);
+
+    let mut finance_wallets = Vec::new(&env);
+    for _ in 0..3 {
+        finance_wallets.push_back(Address::generate(&env));
+    }
+
+    let meter_id = client.register_meter(&user, &provider, &100, &token_address, &device_key(&env, 1), &0, &0);
+    client.configure_multisig_withdrawal(&provider, &finance_wallets, &2, &100_000_00);
+    let request_id = client.propose_multisig_withdrawal(&provider, &meter_id, &150_000_00, &treasury);
+
+    let non_signer = Address::generate(&env);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.approve_multisig_withdrawal(&provider, &request_id, &non_signer);
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_multisig_rejects_threshold_below_minimum() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(UtilityContract, ());
+    let client = UtilityContractClient::new(&env, &contract_id);
+
+    let provider = Address::generate(&env);
+    let mut finance_wallets = Vec::new(&env);
+    for _ in 0..3 {
+        finance_wallets.push_back(Address::generate(&env));
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.configure_multisig_withdrawal(&provider, &finance_wallets, &1, &100_000_00);
+    }));
+    assert!(result.is_err());
 }
 
 #[test]

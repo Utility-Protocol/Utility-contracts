@@ -41,7 +41,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
-    Env, Symbol, Vec,
+    Bytes, Env, Symbol, Vec,
 };
 
 use crate::{ContractError, DataKey};
@@ -512,38 +512,9 @@ pub struct TariffOracle;
 #[contractimpl]
 impl TariffOracle {
     /// Initializes the tariff oracle with a grid administrator and initial schedule.
-    ///
-    /// This function sets up the tariff oracle system with the authorized grid administrator
-    /// and an initial daily tariff schedule. After initialization, only the authorized
-    /// administrator can modify tariff schedules.
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The contract environment
-    /// * `grid_admin` - Address of the authorized grid administrator
-    /// * `initial_schedule` - Initial 24-hour tariff schedule
-    ///
-    /// # Errors
-    ///
-    /// * `ContractError::UnauthorizedAdmin` - if already initialized
-    /// * `ContractError::InvalidTariffSchedule` - if schedule validation fails
-    ///
-    /// # Security Considerations
-    ///
-    /// - The grid_admin address must be securely stored and protected
-    /// - Initial schedule should be reasonable for consumer protection
-    /// - Schedule signature must be verified before storage
-    /// - Initialization should be performed by trusted deployer
-    ///
-    /// # Consumer Protection
-    ///
-    /// - Initial schedule becomes effective immediately
-    /// - Future changes require 24-hour notice period
-    /// - Schedule is visible to all market participants
-    /// - Historical rates are preserved for audit purposes
     pub fn initialize(env: Env, grid_admin: Address, initial_schedule: DailyTariffSchedule) {
         // Check if already initialized
-        if env.storage().persistent().has(&DataKey::TariffOracleAdmin) {
+        if env.storage().persistent().has(&DataKey::TariffOracleAdmin.encode(&env)) {
             panic!("Tariff oracle already initialized");
         }
 
@@ -553,28 +524,28 @@ impl TariffOracle {
         // Store admin
         env.storage()
             .persistent()
-            .set(&DataKey::TariffOracleAdmin, &grid_admin);
+            .set(&DataKey::TariffOracleAdmin.encode(&env), &grid_admin);
 
         // Store initial schedule
         env.storage()
             .persistent()
-            .set(&DataKey::CurrentTariffSchedule, &initial_schedule);
+            .set(&DataKey::CurrentTariffSchedule.encode(&env), &initial_schedule);
 
         // Store schedule hash for integrity
         let schedule_hash = env.crypto().sha256(&initial_schedule);
         env.storage()
             .persistent()
-            .set(&DataKey::TariffScheduleHash, &schedule_hash);
+            .set(&DataKey::TariffScheduleHash.encode(&env), &schedule_hash);
 
         // Initialize proposal counter
         env.storage()
             .persistent()
-            .set(&DataKey::TariffProposalCounter, &0u64);
+            .set(&DataKey::TariffProposalCounter.encode(&env), &0u64);
 
         // Store temporary schedule for current day
         env.storage()
             .temporary()
-            .set(&DataKey::TodayTariffSchedule, &initial_schedule);
+            .set(&DataKey::TodayTariffSchedule.encode(&env), &initial_schedule);
 
         env.events().publish(
             (symbol_short!("TOInit"),),
@@ -611,7 +582,7 @@ impl TariffOracle {
         let proposal_id: u64 = env
             .storage()
             .persistent()
-            .get(&DataKey::TariffProposalCounter)
+            .get(&DataKey::TariffProposalCounter.encode(&env))
             .unwrap_or(0);
 
         let next_proposal_id = proposal_id + 1;
@@ -620,7 +591,7 @@ impl TariffOracle {
         let current_hash: soroban_sdk::BytesN<32> = env
             .storage()
             .persistent()
-            .get(&DataKey::TariffScheduleHash)
+            .get(&DataKey::TariffScheduleHash.encode(&env))
             .unwrap_or_else(|| soroban_sdk::BytesN::from_array(&[0u8; 32]));
 
         // Create proposal with notice period
@@ -638,12 +609,12 @@ impl TariffOracle {
         // Store proposal
         env.storage()
             .persistent()
-            .set(&DataKey::TariffUpdateProposal(next_proposal_id), &proposal);
+            .set(&DataKey::TariffUpdateProposal(next_proposal_id).encode(&env), &proposal);
 
         // Update counter
         env.storage()
             .persistent()
-            .set(&DataKey::TariffProposalCounter, &next_proposal_id);
+            .set(&DataKey::TariffProposalCounter.encode(&env), &next_proposal_id);
 
         env.events().publish(
             (symbol_short!("TUpdProp"),),
@@ -668,11 +639,11 @@ impl TariffOracle {
         grid_admin.require_auth();
 
         // Get proposal
-        let proposal_key = DataKey::TariffUpdateProposal(proposal_id);
+        let proposal_key_encoded = DataKey::TariffUpdateProposal(proposal_id).encode(&env);
         let mut proposal: TariffUpdateProposal = env
             .storage()
             .persistent()
-            .get(&proposal_key)
+            .get(&proposal_key_encoded)
             .unwrap_or_else(|| panic_with_error!(env, ContractError::NotFound));
 
         // Check if already executed
@@ -690,28 +661,28 @@ impl TariffOracle {
         let current_schedule: DailyTariffSchedule = env
             .storage()
             .persistent()
-            .get(&DataKey::CurrentTariffSchedule)
+            .get(&DataKey::CurrentTariffSchedule.encode(&env))
             .unwrap();
 
         // Execute the update
         env.storage()
             .persistent()
-            .set(&DataKey::CurrentTariffSchedule, &proposal.new_schedule);
+            .set(&DataKey::CurrentTariffSchedule.encode(&env), &proposal.new_schedule);
 
         // Update schedule hash
         let new_hash = env.crypto().sha256(&proposal.new_schedule);
         env.storage()
             .persistent()
-            .set(&DataKey::TariffScheduleHash, &new_hash);
+            .set(&DataKey::TariffScheduleHash.encode(&env), &new_hash);
 
         // Update temporary storage for today
         env.storage()
             .temporary()
-            .set(&DataKey::TodayTariffSchedule, &proposal.new_schedule);
+            .set(&DataKey::TodayTariffSchedule.encode(&env), &proposal.new_schedule);
 
         // Mark proposal as executed
         proposal.is_executed = true;
-        env.storage().persistent().set(&proposal_key, &proposal);
+        env.storage().persistent().set(&proposal_key_encoded, &proposal);
 
         // Emit transition event
         env.events().publish(
@@ -820,7 +791,7 @@ impl TariffOracle {
         if let Some(schedule) = env
             .storage()
             .temporary()
-            .get::<DataKey, DailyTariffSchedule>(&DataKey::TodayTariffSchedule)
+            .get::<Bytes, DailyTariffSchedule>(&DataKey::TodayTariffSchedule.encode(&env))
         {
             return Self::get_tariff_from_schedule(&schedule, hour);
         }
@@ -829,63 +800,34 @@ impl TariffOracle {
         let schedule: DailyTariffSchedule = env
             .storage()
             .persistent()
-            .get(&DataKey::CurrentTariffSchedule)
+            .get(&DataKey::CurrentTariffSchedule.encode(&env))
             .unwrap_or_else(|| Self::get_default_schedule());
 
         Self::get_tariff_from_schedule(&schedule, hour)
     }
 
-    /// Get current tariff schedule
-    ///
-    /// # Arguments
-    /// * `env` - The contract environment
-    ///
-    /// # Returns
-    /// Current daily tariff schedule
     pub fn get_current_schedule(env: Env) -> DailyTariffSchedule {
         env.storage()
             .persistent()
-            .get(&DataKey::CurrentTariffSchedule)
+            .get(&DataKey::CurrentTariffSchedule.encode(&env))
             .unwrap_or_else(|| Self::get_default_schedule())
     }
 
-    /// Check if tariff oracle is properly configured
-    ///
-    /// # Arguments
-    /// * `env` - The contract environment
-    ///
-    /// # Returns
-    /// `true` if oracle is configured, `false` otherwise
     pub fn is_configured(env: Env) -> bool {
-        env.storage().persistent().has(&DataKey::TariffOracleAdmin)
+        env.storage().persistent().has(&DataKey::TariffOracleAdmin.encode(&env))
     }
 
-    /// Get grid administrator address
-    ///
-    /// # Arguments
-    /// * `env` - The contract environment
-    ///
-    /// # Returns
-    /// Grid administrator address
     pub fn get_grid_admin(env: Env) -> Address {
         env.storage()
             .persistent()
-            .get(&DataKey::TariffOracleAdmin)
+            .get(&DataKey::TariffOracleAdmin.encode(&env))
             .unwrap_or_else(|| panic_with_error!(env, ContractError::NotInitialized))
     }
 
-    /// Get tariff update proposal
-    ///
-    /// # Arguments
-    /// * `env` - The contract environment
-    /// * `proposal_id` - Proposal ID
-    ///
-    /// # Returns
-    /// Tariff update proposal details
     pub fn get_tariff_proposal(env: Env, proposal_id: u64) -> TariffUpdateProposal {
         env.storage()
             .persistent()
-            .get(&DataKey::TariffUpdateProposal(proposal_id))
+            .get(&DataKey::TariffUpdateProposal(proposal_id).encode(&env))
             .unwrap_or_else(|| panic_with_error!(env, ContractError::NotFound))
     }
 }

@@ -375,3 +375,113 @@ fn test_balance_query_for_nonexistent_account() {
     // Balance should be 0 for nonexistent account
     assert_eq!(client.balance(&nonexistent), 0);
 }
+
+// --- MAX_SUPPLY cap enforcement (issue #1) -------------------------------
+
+use crate::MAX_SUPPLY;
+
+#[test]
+fn test_mint_up_to_max_supply_succeeds() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.mint(&recipient, &MAX_SUPPLY);
+
+    assert_eq!(client.total_supply(), MAX_SUPPLY);
+    assert_eq!(client.balance(&recipient), MAX_SUPPLY);
+}
+
+#[test]
+#[should_panic(expected = "Max supply exceeded")]
+fn test_mint_exceeding_max_supply_panics() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.mint(&recipient, &MAX_SUPPLY);
+    // One unit past the cap must be rejected.
+    client.mint(&recipient, &1);
+}
+
+#[test]
+#[should_panic(expected = "Max supply exceeded")]
+fn test_mint_overflowing_supply_in_two_steps_panics() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.mint(&a, &(MAX_SUPPLY - 1));
+    // total_supply == MAX_SUPPLY - 1; a second mint of 2 would reach
+    // MAX_SUPPLY + 1. This is the scenario the issue framed as a "race": in
+    // Soroban the two calls are serial, and the cap rejects the overflowing one.
+    client.mint(&b, &2);
+}
+
+#[test]
+fn test_repeated_mints_never_exceed_max_supply() {
+    // Soroban applies transactions serially, so "100 concurrent mints" is really
+    // 100 sequential invocations. Mint MAX_SUPPLY in 100 equal chunks and assert
+    // the cap holds at every step and the supply invariant (total_supply == sum
+    // of balances) is preserved.
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+
+    let iterations: i128 = 100;
+    let chunk = MAX_SUPPLY / iterations; // 100 * chunk == MAX_SUPPLY exactly
+    for i in 1..=iterations {
+        client.mint(&recipient, &chunk);
+        let supply = client.total_supply();
+        assert!(supply <= MAX_SUPPLY, "supply exceeded cap at step {}", i);
+        // Invariant: total_supply == Σ(balances) (single recipient here).
+        assert_eq!(supply, client.balance(&recipient));
+        assert_eq!(supply, chunk * i);
+    }
+
+    assert_eq!(client.total_supply(), MAX_SUPPLY);
+}
+
+#[test]
+fn test_burn_after_max_supply_allows_reminting() {
+    // Burning frees headroom under the cap; the supply invariant must hold.
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.mint(&recipient, &MAX_SUPPLY);
+    client.burn(&recipient, &1000);
+    assert_eq!(client.total_supply(), MAX_SUPPLY - 1000);
+
+    // Now there is room to mint exactly 1000 again, but not 1001.
+    client.mint(&recipient, &1000);
+    assert_eq!(client.total_supply(), MAX_SUPPLY);
+    assert_eq!(client.balance(&recipient), MAX_SUPPLY);
+}

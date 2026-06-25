@@ -9,6 +9,14 @@ pub const TTL_OPERATOR_DELEGATION: u32 = 30 * 86400;
 /// Maximum call chain depth allowed
 pub const MAX_CHAIN_DEPTH: u32 = 5;
 
+/// Maximum total supply of resource-backed tokens (10^15 base units).
+///
+/// Each token is backed 1:1 by a real-world resource deposit, so the total
+/// supply must never exceed the maximum backable amount. `mint` enforces
+/// `total_supply <= MAX_SUPPLY`; combined with overflow-checked accounting this
+/// keeps the invariant `total_supply == Σ(balances) <= MAX_SUPPLY`.
+pub const MAX_SUPPLY: i128 = 1_000_000_000_000_000;
+
 /// Storage keys for the contract
 #[derive(Clone)]
 #[contracttype]

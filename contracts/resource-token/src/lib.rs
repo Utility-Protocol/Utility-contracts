@@ -27,7 +27,7 @@ pub use auth::{authorize_burn, authorize_mint};
 pub use operators::{authorize_operator, is_valid_operator, revoke_operator};
 use storage as storage_mod;
 pub use storage::{
-    get_balance, get_total_supply, set_balance, set_total_supply, MAX_CHAIN_DEPTH,
+    get_balance, get_total_supply, set_balance, set_total_supply, MAX_CHAIN_DEPTH, MAX_SUPPLY,
     NAMESPACE_PREFIX, TTL_OPERATOR_DELEGATION,
 };
 
@@ -119,30 +119,43 @@ impl ResourceToken {
     /// # Panics
     /// * If caller is not authorized (not admin or valid operator)
     /// * If amount is negative or zero
+    /// * If the mint would push `total_supply` above `MAX_SUPPLY`
     /// * If call chain depth is exceeded
     pub fn mint(env: Env, to: Address, amount: i128) {
         // Authorize with full call chain verification
         authorize_mint(&env);
-        
+
         // Validate amount
         if amount <= 0 {
             panic!("Amount must be positive");
         }
-        
-        // Update balance
+
+        // Compute the new total supply first and enforce the supply cap BEFORE
+        // any state is written. Each token is backed 1:1 by a real resource
+        // deposit, so total_supply must never exceed MAX_SUPPLY. Soroban applies
+        // transactions serially and each sees committed state, so this
+        // check-then-write is atomic with respect to other transactions — there
+        // is no in-ledger concurrency to guard against; the real invariant to
+        // enforce is the cap itself.
+        let current_supply = get_total_supply(&env);
+        let new_supply = current_supply
+            .checked_add(amount)
+            .expect("Supply overflow");
+        if new_supply > MAX_SUPPLY {
+            panic!("Max supply exceeded");
+        }
+
+        // Update balance (overflow-checked; the workspace build does not enable
+        // overflow-checks, so the explicit check is load-bearing).
         let current_balance = get_balance(&env, &to);
         let new_balance = current_balance
             .checked_add(amount)
             .expect("Balance overflow");
         set_balance(&env, &to, new_balance);
-        
-        // Update total supply
-        let current_supply = get_total_supply(&env);
-        let new_supply = current_supply
-            .checked_add(amount)
-            .expect("Supply overflow");
+
+        // Commit the new total supply.
         set_total_supply(&env, new_supply);
-        
+
         // Emit event
         env.events().publish(
             (soroban_sdk::symbol_short!("mint"),),
@@ -174,17 +187,22 @@ impl ResourceToken {
             panic!("Amount must be positive");
         }
         
-        // Update balance
+        // Update balance (overflow-checked subtraction; the workspace build does
+        // not enable overflow-checks, so use checked_sub rather than `-`).
         let current_balance = get_balance(&env, &from);
         if current_balance < amount {
             panic!("Insufficient balance");
         }
-        let new_balance = current_balance - amount;
+        let new_balance = current_balance
+            .checked_sub(amount)
+            .expect("Balance underflow");
         set_balance(&env, &from, new_balance);
-        
+
         // Update total supply
         let current_supply = get_total_supply(&env);
-        let new_supply = current_supply - amount;
+        let new_supply = current_supply
+            .checked_sub(amount)
+            .expect("Supply underflow");
         set_total_supply(&env, new_supply);
         
         // Emit event

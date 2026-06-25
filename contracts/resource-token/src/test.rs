@@ -485,3 +485,73 @@ fn test_burn_after_max_supply_allows_reminting() {
     assert_eq!(client.total_supply(), MAX_SUPPLY);
     assert_eq!(client.balance(&recipient), MAX_SUPPLY);
 }
+
+// --- Mint/Burn authorization enforcement (issue #4) ----------------------
+//
+// The contract gates mint()/burn() with authorize_mint()/authorize_burn(),
+// which require the admin's authorization (admin.require_auth()). Every other
+// test in this file uses `mock_all_auths()`, which auto-approves all auth and
+// therefore never exercises the gate — a regression that removed the
+// authorization call would pass all of those tests. These tests provide an
+// EMPTY authorization set via `set_auths(&[])` so the gate is actually exercised
+// and proven to reject unauthorized mint/burn (the invariant: every mint/burn
+// must be authorized by the admin).
+
+#[test]
+#[should_panic]
+fn test_mint_rejected_without_authorization() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    // Authorize only the setup, then drop all authorizations.
+    env.mock_all_auths();
+    client.initialize(&admin);
+    env.set_auths(&[]); // no authorization provided for the next call
+
+    // Must panic: the admin has not authorized this mint.
+    client.mint(&recipient, &1000);
+}
+
+#[test]
+#[should_panic]
+fn test_burn_rejected_without_authorization() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let account = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin);
+    client.mint(&account, &1000);
+    env.set_auths(&[]); // no authorization provided for the next call
+
+    // Must panic: the admin has not authorized this burn.
+    client.burn(&account, &500);
+}
+
+#[test]
+fn test_mint_rejected_without_auth_leaves_state_unchanged() {
+    // Belt-and-suspenders: a rejected mint must not move balance or supply.
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    env.mock_all_auths();
+    client.initialize(&admin);
+    env.set_auths(&[]);
+
+    // try_* returns Err instead of unwinding, so we can assert on the aftermath.
+    let result = client.try_mint(&recipient, &1000);
+    assert!(result.is_err(), "unauthorized mint must be rejected");
+    assert_eq!(client.balance(&recipient), 0);
+    assert_eq!(client.total_supply(), 0);
+}

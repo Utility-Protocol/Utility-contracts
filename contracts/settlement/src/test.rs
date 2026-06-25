@@ -170,6 +170,42 @@ fn test_randomized_properties() {
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
 
+/// A malicious token whose `transfer` re-enters the settlement contract,
+/// modelling the cross-contract reentrancy attack from issue #8.
+#[contracttype]
+#[derive(Clone)]
+enum MalKey {
+    Settlement,
+    Payer,
+    Collector,
+}
+
+#[contract]
+struct MaliciousToken;
+
+#[contractimpl]
+impl MaliciousToken {
+    pub fn setup(env: Env, settlement: Address, payer: Address, collector: Address) {
+        env.storage().instance().set(&MalKey::Settlement, &settlement);
+        env.storage().instance().set(&MalKey::Payer, &payer);
+        env.storage().instance().set(&MalKey::Collector, &collector);
+    }
+
+    /// SEP-41 `transfer` entry point invoked by the settlement contract's
+    /// `collect_fee`. Instead of moving tokens it attempts to re-enter `settle`,
+    /// which must be rejected by the reentrancy guard.
+    pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
+        let settlement: Address = env.storage().instance().get(&MalKey::Settlement).unwrap();
+        let payer: Address = env.storage().instance().get(&MalKey::Payer).unwrap();
+        let collector: Address = env.storage().instance().get(&MalKey::Collector).unwrap();
+        let me = env.current_contract_address();
+
+        let client = SettlementContractClient::new(&env, &settlement);
+        // Reentrant call: settle again using this malicious token as the token.
+        client.settle(&me, &payer, &payer, &collector, &10_000i128, &100u32);
+    }
+}
+
 use crate::constants::DECIMAL_DENOMINATOR;
 use crate::types::SettlementArgs;
 use crate::{SettlementContract, SettlementContractClient};
@@ -349,4 +385,69 @@ fn test_user_min_expected_amount_higher_than_actual_fails() {
     }));
 
     assert!(result.is_err());
+}
+
+#[test]
+fn test_settle_normal_flow_with_guard() {
+    // The reentrancy guard must not break a legitimate single (non-reentrant) call.
+    let (env, _oracle_id, _admin, payer, payee, fee_collector) = setup_env();
+    let settlement_id = setup_settlement(&env);
+    let settlement_client = SettlementContractClient::new(&env, &settlement_id);
+
+    let token_id = setup_token(&env, &payer, 1_000_000i128);
+
+    let (net, fee) =
+        settlement_client.settle(&token_id, &payer, &payee, &fee_collector, &10_000i128, &100u32);
+
+    assert_eq!(fee, 100);
+    assert_eq!(net, 9_900);
+}
+
+#[test]
+fn test_reentrancy_attack_is_blocked() {
+    // settle -> collect_fee -> malicious token.transfer -> reentrant settle.
+    // The second `settle` must hit the held lock and panic, aborting the tx.
+    let (env, _oracle_id, _admin, payer, _payee, fee_collector) = setup_env();
+    let settlement_id = setup_settlement(&env);
+    let settlement_client = SettlementContractClient::new(&env, &settlement_id);
+
+    let mal_id = env.register(MaliciousToken, ());
+    let mal_client = MaliciousTokenClient::new(&env, &mal_id);
+    mal_client.setup(&settlement_id, &payer, &fee_collector);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        settlement_client.settle(
+            &mal_id,
+            &payer,
+            &payer, // payee
+            &fee_collector,
+            &10_000i128,
+            &100u32,
+        );
+    }));
+
+    assert!(result.is_err(), "reentrant settle must be rejected by the guard");
+}
+
+#[test]
+fn test_reentrancy_attack_via_finalize_is_blocked() {
+    // Same attack through the oracle-based entry point: collect_fee invokes the
+    // malicious token, which re-enters settle while finalize_settlement holds
+    // the lock.
+    let (env, oracle_id, _admin, payer, payee, fee_collector) = setup_env();
+    let settlement_id = setup_settlement(&env);
+    let settlement_client = SettlementContractClient::new(&env, &settlement_id);
+
+    let mal_id = env.register(MaliciousToken, ());
+    let mal_client = MaliciousTokenClient::new(&env, &mal_id);
+    mal_client.setup(&settlement_id, &payer, &fee_collector);
+
+    let volume = 1_000_0000i128;
+    let args = make_args(mal_id, volume, payee.clone(), None);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        settlement_client.finalize_settlement(&oracle_id, &payer, &fee_collector, &args, &100u32);
+    }));
+
+    assert!(result.is_err(), "reentrant finalize_settlement must be rejected");
 }

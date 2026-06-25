@@ -4,6 +4,8 @@ mod constants;
 mod conversion;
 mod fees;
 mod rate_application;
+mod reentrancy;
+mod storage;
 mod token_utils;
 mod types;
 
@@ -15,6 +17,7 @@ mod test;
 use crate::constants::MAX_FEE_RATE_BPS;
 use crate::conversion::convert_to_settlement_currency;
 use crate::fees::compute_fee;
+use crate::reentrancy::ReentrancyGuard;
 use crate::token_utils::collect_fee;
 use crate::types::{SettlementArgs, SettlementResult};
 
@@ -31,6 +34,8 @@ pub enum SettlementError {
     InvalidFeeRate = 1,
     InsufficientBalance = 2,
     SlippageExceeded = 3,
+    /// A cross-contract callback attempted to re-enter a guarded entry point.
+    ReentrantCall = 4,
 }
 
 #[contract]
@@ -60,6 +65,9 @@ impl SettlementContract {
         amount: i128,
         rate_bps: u32,
     ) -> (i128, i128) {
+        // Acquire before any cross-contract call; released on scope exit.
+        let _guard = ReentrancyGuard::new(&env);
+
         if rate_bps > MAX_FEE_RATE_BPS {
             panic_with_error!(&env, SettlementError::InvalidFeeRate);
         }
@@ -110,6 +118,11 @@ impl SettlementContract {
         args: SettlementArgs,
         rate_bps: u32,
     ) -> SettlementResult {
+        // Acquire before any cross-contract call (oracle / token); released on
+        // scope exit. Blocks a malicious token or oracle from re-entering
+        // finalize_settlement before this invocation completes.
+        let _guard = ReentrancyGuard::new(&env);
+
         if rate_bps > MAX_FEE_RATE_BPS {
             panic_with_error!(&env, SettlementError::InvalidFeeRate);
         }

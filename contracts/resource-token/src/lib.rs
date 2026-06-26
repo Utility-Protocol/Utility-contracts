@@ -18,6 +18,7 @@ extern crate alloc;
 use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
 
 mod admin;
+mod allowance;
 mod auth;
 mod operators;
 mod storage;
@@ -236,6 +237,31 @@ impl ResourceToken {
     /// Must be called by the admin after a contract upgrade.
     pub fn migrate_namespace(env: Env, addresses: Vec<Address>) {
         storage_mod::migrate_namespace(&env, &addresses);
+    }
+
+    /// Set allowance for a spender
+    pub fn approve(env: Env, owner: Address, spender: Address, amount: i128) {
+        allowance::approve(env, owner, spender, amount);
+    }
+
+    /// Increase allowance for a spender
+    pub fn increase_allowance(env: Env, owner: Address, spender: Address, delta: i128) {
+        allowance::increase_allowance(env, owner, spender, delta);
+    }
+
+    /// Decrease allowance for a spender
+    pub fn decrease_allowance(env: Env, owner: Address, spender: Address, delta: i128) {
+        allowance::decrease_allowance(env, owner, spender, delta);
+    }
+
+    /// Get allowance for a spender
+    pub fn allowance(env: Env, owner: Address, spender: Address) -> i128 {
+        allowance::get_allowance(env, owner, spender)
+    }
+
+    /// Transfer tokens using an allowance
+    pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        allowance::transfer_from(env, spender, from, to, amount);
     }
 }
 

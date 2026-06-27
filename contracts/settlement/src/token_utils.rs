@@ -27,7 +27,7 @@ pub fn collect_fee(
         return 0;
     }
 
-    let fee = compute_fee(amount, rate_bps);
+    let fee = compute_fee(env, amount, rate_bps);
 
     if fee == 0 {
         return 0;

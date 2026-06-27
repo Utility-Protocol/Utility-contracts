@@ -32,14 +32,18 @@ pub fn compute_fallback_rate() -> i128 {
     FALLBACK_RATE
 }
 
+use soroban_sdk::panic_with_error;
+use utility_contracts_common::errors::ArithmeticError;
+
 /// Apply a 7-decimal fixed-point `rate` to `volume`: `volume * rate / 1e7`.
 /// Overflow-checked.
-pub fn apply_rate_to_volume(volume: i128, rate: i128) -> i128 {
-    volume
-        .checked_mul(rate)
-        .expect("rate application overflow")
-        .checked_div(DECIMAL_DENOMINATOR)
-        .expect("rate application underflow")
+pub fn apply_rate_to_volume(env: &Env, volume: i128, rate: i128) -> i128 {
+    let product = volume.checked_mul(rate).unwrap_or_else(|| {
+        panic_with_error!(env, ArithmeticError::Overflow);
+    });
+    product.checked_div(DECIMAL_DENOMINATOR).unwrap_or_else(|| {
+        panic_with_error!(env, ArithmeticError::DivisionByZero);
+    })
 }
 
 /// Fetch the current oracle rate, **rejecting** stale data.

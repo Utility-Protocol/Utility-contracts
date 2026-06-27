@@ -114,8 +114,8 @@ impl SettlementContract {
     }
 
     /// Compute the fee for a given amount and rate (pure, no side effects).
-    pub fn calculate_fee(_env: Env, amount: i128, rate_bps: u32) -> i128 {
-        compute_fee(amount, rate_bps)
+    pub fn calculate_fee(env: Env, amount: i128, rate_bps: u32) -> i128 {
+        compute_fee(&env, amount, rate_bps)
     }
 
     /// Finalize settlement with oracle-based currency conversion and slippage protection.

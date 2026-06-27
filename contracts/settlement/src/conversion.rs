@@ -26,7 +26,7 @@ pub fn convert_to_settlement_currency(
     volume: i128,
     min_expected_amount: Option<i128>,
 ) -> i128 {
-    let expected_amount = apply_rate_to_volume(volume, rate);
+    let expected_amount = apply_rate_to_volume(env, volume, rate);
 
     let actual_amount = expected_amount;
 

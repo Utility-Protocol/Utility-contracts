@@ -257,3 +257,41 @@ fn test_invalid_time_range_rejected() {
     let res = client.try_get_aggregated_volume(&device, &100, &50);
     assert!(res.is_err());
 }
+
+#[test]
+fn test_max_aggregation_scenario_property() {
+    // Technical Invariants & Bounds from issue description:
+    let max_reading: i128 = 10_000_000_000_000; // 1M tokens * 1e7 precision
+    let max_readings_per_device: u32 = 1_000_000;
+    let max_devices: u32 = 100_000;
+    let max_rate: i128 = 10_000_000_000_000; // 1M rate * 1e7 precision
+
+    // Simulate aggregation for one device
+    let mut device_total: i128 = 0;
+    // Instead of looping 1M times (too slow for test), we do it in steps
+    for _ in 0..100 {
+        let chunk_sum = max_reading.checked_mul(max_readings_per_device as i128 / 100).unwrap();
+        device_total = device_total.checked_add(chunk_sum).unwrap();
+    }
+    assert_eq!(device_total, 10_000_000_000_000_000_000); // 1e19
+
+    // Cross-device aggregation
+    let mut total_volume: i128 = 0;
+    for _ in 0..100 {
+        let chunk_sum = device_total.checked_mul(max_devices as i128 / 100).unwrap();
+        total_volume = total_volume.checked_add(chunk_sum).unwrap();
+    }
+    assert_eq!(total_volume, 1_000_000_000_000_000_000_000_000); // 1e24
+
+    // Tariff rate application (total_volume * max_rate)
+    // Before division by DECIMAL_DENOMINATOR (1e7)
+    let product = total_volume.checked_mul(max_rate).unwrap();
+    assert_eq!(product, 10_000_000_000_000_000_000_000_000_000_000_000_000); // 1e37
+
+    // Ensure it is still within i128::MAX
+    assert!(product < i128::MAX);
+
+    // Final settlement amount after 1e7 adjustment
+    let final_amount = product.checked_div(10_000_000).unwrap();
+    assert_eq!(final_amount, 1_000_000_000_000_000_000_000_000_000_000); // 1e30
+}

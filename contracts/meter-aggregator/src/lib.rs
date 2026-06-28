@@ -32,6 +32,7 @@
 //! hour/day.
 
 use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Env};
+use utility_contracts_common::errors::ArithmeticError;
 
 pub mod constants;
 pub mod storage;
@@ -45,11 +46,11 @@ use constants::{
 };
 use types::{DailyBucket, Error, HourlyBucket, RawReading};
 
-/// Overflow-checked `i128` addition that traps with [`Error::Overflow`].
+/// Overflow-checked `i128` addition that traps with [`ArithmeticError::Overflow`].
 fn checked_add(env: &Env, a: i128, b: i128) -> i128 {
     match a.checked_add(b) {
         Some(v) => v,
-        None => panic_with_error!(env, Error::Overflow),
+        None => panic_with_error!(env, ArithmeticError::Overflow),
     }
 }
 

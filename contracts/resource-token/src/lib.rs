@@ -15,7 +15,8 @@ extern crate alloc;
 // The authorization check validates the full invocation chain to ensure that
 // a malicious intermediate contract cannot spoof authorization.
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, panic_with_error, Address, Env, Vec};
+use utility_contracts_common::errors::ArithmeticError;
 
 mod admin;
 mod allowance;
@@ -139,9 +140,9 @@ impl ResourceToken {
         // is no in-ledger concurrency to guard against; the real invariant to
         // enforce is the cap itself.
         let current_supply = get_total_supply(&env);
-        let new_supply = current_supply
-            .checked_add(amount)
-            .expect("Supply overflow");
+        let new_supply = current_supply.checked_add(amount).unwrap_or_else(|| {
+            panic_with_error!(&env, ArithmeticError::Overflow);
+        });
         if new_supply > MAX_SUPPLY {
             panic!("Max supply exceeded");
         }
@@ -149,9 +150,9 @@ impl ResourceToken {
         // Update balance (overflow-checked; the workspace build does not enable
         // overflow-checks, so the explicit check is load-bearing).
         let current_balance = get_balance(&env, &to);
-        let new_balance = current_balance
-            .checked_add(amount)
-            .expect("Balance overflow");
+        let new_balance = current_balance.checked_add(amount).unwrap_or_else(|| {
+            panic_with_error!(&env, ArithmeticError::Overflow);
+        });
         set_balance(&env, &to, new_balance);
 
         // Commit the new total supply.
@@ -194,16 +195,16 @@ impl ResourceToken {
         if current_balance < amount {
             panic!("Insufficient balance");
         }
-        let new_balance = current_balance
-            .checked_sub(amount)
-            .expect("Balance underflow");
+        let new_balance = current_balance.checked_sub(amount).unwrap_or_else(|| {
+            panic_with_error!(&env, ArithmeticError::Underflow);
+        });
         set_balance(&env, &from, new_balance);
 
         // Update total supply
         let current_supply = get_total_supply(&env);
-        let new_supply = current_supply
-            .checked_sub(amount)
-            .expect("Supply underflow");
+        let new_supply = current_supply.checked_sub(amount).unwrap_or_else(|| {
+            panic_with_error!(&env, ArithmeticError::Underflow);
+        });
         set_total_supply(&env, new_supply);
         
         // Emit event

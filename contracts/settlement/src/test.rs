@@ -5,10 +5,12 @@ use crate::{
     fees::compute_fee,
     token_utils::verify_fee_invariant,
 };
+use soroban_sdk::Env;
 
 /// Round-half-up invariant: |fee * 10000 - amount * rate_bps| <= 5000
 fn invariant_error_bounded(amount: i128, rate_bps: u32) -> bool {
-    let fee = compute_fee(amount, rate_bps);
+    let env = Env::default();
+    let fee = compute_fee(&env, amount, rate_bps);
     let scaled_fee = fee * BPS_DENOMINATOR as i128;
     let exact = amount * rate_bps as i128;
     (scaled_fee - exact).abs() <= 5000
@@ -49,9 +51,10 @@ fn test_edge_cases_property_based() {
         MAX_SETTLEMENT,
     ];
 
+    let env = Env::default();
     for &amount in &amounts {
         for &rate_bps in &rates {
-            let fee = compute_fee(amount, rate_bps);
+            let fee = compute_fee(&env, amount, rate_bps);
 
             assert!(
                 invariant_error_bounded(amount, rate_bps),
@@ -74,16 +77,17 @@ fn test_edge_cases_property_based() {
 
 #[test]
 fn test_micro_settlement_extraction_prevention() {
+    let env = Env::default();
     let rate_bps = 100;
     let micro_amount: i128 = 1;
 
-    let per_txn_fee = compute_fee(micro_amount, rate_bps);
+    let per_txn_fee = compute_fee(&env, micro_amount, rate_bps);
     assert_eq!(
         per_txn_fee, 0,
         "Micro-settlement fee should be 0 for rate_bps < 5000"
     );
 
-    let micro_fee_higher_rate = compute_fee(micro_amount, 5001);
+    let micro_fee_higher_rate = compute_fee(&env, micro_amount, 5001);
     assert_eq!(
         micro_fee_higher_rate, 1,
         "Round-half-up should round 5001/10000 = 1 for micro amount"
@@ -92,17 +96,17 @@ fn test_micro_settlement_extraction_prevention() {
     let num_txns: i128 = 1_000_000;
     let mut total_truncation_style: i128 = 0;
     for _ in 0..num_txns {
-        total_truncation_style += compute_fee(micro_amount, rate_bps);
+        total_truncation_style += compute_fee(&env, micro_amount, rate_bps);
     }
     assert_eq!(total_truncation_style, 0);
 
     let mut total_at_5001: i128 = 0;
     for _ in 0..num_txns {
-        total_at_5001 += compute_fee(micro_amount, 5001);
+        total_at_5001 += compute_fee(&env, micro_amount, 5001);
     }
     assert_eq!(total_at_5001, num_txns);
 
-    let lump_sum = compute_fee(num_txns * micro_amount, 5001);
+    let lump_sum = compute_fee(&env, num_txns * micro_amount, 5001);
     let diff = (total_at_5001 - lump_sum).abs();
     let max_per_txn_error = 5000i128;
     let max_cumulative_error = num_txns * max_per_txn_error;
@@ -120,6 +124,7 @@ fn test_micro_settlement_extraction_prevention() {
 
 #[test]
 fn test_truncation_vs_rounding_comparison() {
+    let env = Env::default();
     let test_cases: [(i128, u32, i128, i128); 5] = [
         (1, 5000, 0, 1),
         (1, 5001, 0, 1),
@@ -131,7 +136,7 @@ fn test_truncation_vs_rounding_comparison() {
     for &(amount, rate_bps, truncation, rounding) in &test_cases {
         let trunc_result = (amount * rate_bps as i128) / BPS_DENOMINATOR as i128;
         assert_eq!(trunc_result, truncation, "Truncation mismatch");
-        let round_result = compute_fee(amount, rate_bps);
+        let round_result = compute_fee(&env, amount, rate_bps);
         assert_eq!(round_result, rounding, "Rounding mismatch");
         assert!(
             round_result >= trunc_result,
@@ -142,20 +147,22 @@ fn test_truncation_vs_rounding_comparison() {
 
 #[test]
 fn test_zero_and_edge_inputs() {
-    assert_eq!(compute_fee(0, 100), 0, "Zero amount");
-    assert_eq!(compute_fee(0, 0), 0, "Zero amount and rate");
-    assert_eq!(compute_fee(100, 0), 0, "Zero rate");
+    let env = Env::default();
+    assert_eq!(compute_fee(&env, 0, 100), 0, "Zero amount");
+    assert_eq!(compute_fee(&env, 0, 0), 0, "Zero amount and rate");
+    assert_eq!(compute_fee(&env, 100, 0), 0, "Zero rate");
 
-    let fee = compute_fee(MAX_SETTLEMENT, MAX_FEE_RATE_BPS);
+    let fee = compute_fee(&env, MAX_SETTLEMENT, MAX_FEE_RATE_BPS);
     let expected = (MAX_SETTLEMENT * MAX_FEE_RATE_BPS as i128 + 5000) / 10000;
     assert_eq!(fee, expected);
 }
 
 #[test]
 fn test_randomized_properties() {
+    let env = Env::default();
     for amount in 1..=1000 {
         for rate_bps in 1..=100 {
-            let fee = compute_fee(amount, rate_bps);
+            let fee = compute_fee(&env, amount, rate_bps);
             assert!(
                 verify_fee_invariant(amount, rate_bps, fee),
                 "Failed at amount={}, rate_bps={}, fee={}",
@@ -168,7 +175,7 @@ fn test_randomized_properties() {
 }
 
 use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address};
 
 use crate::constants::{DECIMAL_DENOMINATOR, FALLBACK_RATE, MAX_ORACLE_AGE};
 
@@ -415,6 +422,7 @@ mod staleness_unit {
         MIN_ORACLE_AGE_BOUND,
     };
     use crate::rate_application::{apply_rate_to_volume, compute_fallback_rate, is_stale};
+    use soroban_sdk::Env;
 
     #[test]
     fn test_max_oracle_age_within_bounds() {
@@ -435,11 +443,14 @@ mod staleness_unit {
 
     #[test]
     fn test_apply_rate_to_volume() {
+        let env = Env::default();
         // volume * rate / 1e7
-        assert_eq!(apply_rate_to_volume(1_000_0000, FALLBACK_RATE), 5_000_000);
-        assert_eq!(apply_rate_to_volume(0, FALLBACK_RATE), 0);
+        // FALLBACK_RATE is 50,000,000 (5.0). DECIMAL_DENOMINATOR is 10,000,000 (1.0).
+        // 1.0 * 5.0 = 5.0 (50,000,000)
+        assert_eq!(apply_rate_to_volume(&env, DECIMAL_DENOMINATOR, FALLBACK_RATE), 50_000_000);
+        assert_eq!(apply_rate_to_volume(&env, 0, FALLBACK_RATE), 0);
         assert_eq!(
-            apply_rate_to_volume(DECIMAL_DENOMINATOR, DECIMAL_DENOMINATOR),
+            apply_rate_to_volume(&env, DECIMAL_DENOMINATOR, DECIMAL_DENOMINATOR),
             DECIMAL_DENOMINATOR
         );
     }
@@ -584,7 +595,7 @@ fn test_stale_oracle_falls_back_to_conservative_rate() {
     );
     // Settlement amount reflects the fallback rate, not the stale oracle price.
     let expected_settlement = volume * FALLBACK_RATE / DECIMAL_DENOMINATOR;
-    let expected_fee = crate::fees::compute_fee(expected_settlement, 100);
+    let expected_fee = crate::fees::compute_fee(&env, expected_settlement, 100);
     assert_eq!(result.fee_amount, expected_fee);
     assert_eq!(result.net_amount, expected_settlement - expected_fee);
 }

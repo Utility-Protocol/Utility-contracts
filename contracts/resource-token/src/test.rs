@@ -555,3 +555,155 @@ fn test_mint_rejected_without_auth_leaves_state_unchanged() {
     assert_eq!(client.balance(&recipient), 0);
     assert_eq!(client.total_supply(), 0);
 }
+
+#[test]
+fn test_allowance_basics() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    client.approve(&owner, &spender, &100);
+    assert_eq!(client.allowance(&owner, &spender), 100);
+
+    client.increase_allowance(&owner, &spender, &50);
+    assert_eq!(client.allowance(&owner, &spender), 150);
+
+    client.decrease_allowance(&owner, &spender, &30);
+    assert_eq!(client.allowance(&owner, &spender), 120);
+}
+
+#[test]
+#[should_panic(expected = "Allowance underflow")]
+fn test_decrease_allowance_underflow() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    client.approve(&owner, &spender, &100);
+    client.decrease_allowance(&owner, &spender, &101);
+}
+
+#[test]
+fn test_transfer_from() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.mint(&owner, &1000);
+
+    client.approve(&owner, &spender, &500);
+    client.transfer_from(&spender, &owner, &recipient, &300);
+
+    assert_eq!(client.balance(&owner), 700);
+    assert_eq!(client.balance(&recipient), 300);
+    assert_eq!(client.allowance(&owner, &spender), 200);
+}
+
+#[test]
+#[should_panic(expected = "Insufficient allowance")]
+fn test_transfer_from_insufficient_allowance() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.mint(&owner, &1000);
+
+    client.approve(&owner, &spender, &200);
+    client.transfer_from(&spender, &owner, &recipient, &300);
+}
+
+#[test]
+fn test_allowance_race_simulation() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.mint(&owner, &2000);
+
+    // Initial allowance 1000
+    client.approve(&owner, &spender, &1000);
+
+    // Spender sees 1000, prepares transfer_from(1000)
+    // Owner decides to reduce allowance to 500
+    // If owner uses approve(500), and spender's TX lands first:
+    // Spender spends 1000, then allowance is SET to 500. Spender can spend another 500. Total 1500.
+
+    client.transfer_from(&spender, &owner, &recipient, &1000);
+    client.approve(&owner, &spender, &500);
+
+    assert_eq!(client.allowance(&owner, &spender), 500);
+    client.transfer_from(&spender, &owner, &recipient, &500);
+    assert_eq!(client.balance(&owner), 500); // 2000 - 1000 - 500 = 500. Spender got 1500 total.
+
+    // Using increase/decrease prevents this.
+    // Reset
+    client.mint(&owner, &1500); // Back to 2000
+    client.approve(&owner, &spender, &1000);
+
+    // Spender prepares transfer_from(1000)
+    // Owner decides to reduce allowance by 500 (to 500)
+    // If owner uses decrease_allowance(500)
+
+    client.transfer_from(&spender, &owner, &recipient, &1000);
+    // This will now panic because 0 - 500 < 0
+    let res = client.try_decrease_allowance(&owner, &spender, &500);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_transfer_from_self() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, ResourceToken);
+    let client = ResourceTokenClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.mint(&owner, &1000);
+
+    client.approve(&owner, &spender, &500);
+
+    // Transfer from owner to owner using spender's allowance
+    client.transfer_from(&spender, &owner, &owner, &300);
+
+    assert_eq!(client.balance(&owner), 1000); // Balance should remain 1000
+    assert_eq!(client.allowance(&owner, &spender), 200); // Allowance should be reduced
+}

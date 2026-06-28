@@ -17,6 +17,9 @@ pub const MAX_CHAIN_DEPTH: u32 = 5;
 /// keeps the invariant `total_supply == Σ(balances) <= MAX_SUPPLY`.
 pub const MAX_SUPPLY: i128 = 1_000_000_000_000_000;
 
+/// Maximum allowance allowed (1M tokens with 7 decimals).
+pub const MAX_ALLOWANCE: i128 = 1_000_000 * 10_000_000;
+
 /// Storage keys for the contract
 #[derive(Clone)]
 #[contracttype]
@@ -31,6 +34,8 @@ pub enum DataKey {
     TotalSupply,
     /// Balance: maps address to balance
     Balance(Address),
+    /// Allowance: maps (owner, spender) to allowance amount
+    Allowance(Address, Address),
 }
 
 impl DataKey {
@@ -116,6 +121,18 @@ pub fn set_balance(env: &Env, address: &Address, balance: i128) {
     env.storage().persistent().set(&key, &balance);
 }
 
+/// Get allowance for a spender from an owner
+pub fn get_allowance(env: &Env, owner: &Address, spender: &Address) -> i128 {
+    let key = DataKey::Allowance(owner.clone(), spender.clone()).encode(env);
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+/// Set allowance for a spender from an owner
+pub fn set_allowance(env: &Env, owner: &Address, spender: &Address, amount: i128) {
+    let key = DataKey::Allowance(owner.clone(), spender.clone()).encode(env);
+    env.storage().persistent().set(&key, &amount);
+}
+
 /// Migrate all storage entries from legacy (non-prefixed) keys to new namespaced keys.
 /// Idempotent — safe to call multiple times.
 pub fn migrate_namespace(env: &Env, addresses: &SdkVec<Address>) {
@@ -180,6 +197,8 @@ mod tests {
         keys.push(DataKey::Nonce(addr2.clone()).encode(&env));
         keys.push(DataKey::Balance(addr1.clone()).encode(&env));
         keys.push(DataKey::Balance(addr2.clone()).encode(&env));
+        keys.push(DataKey::Allowance(addr1.clone(), addr2.clone()).encode(&env));
+        keys.push(DataKey::Allowance(addr2.clone(), addr1.clone()).encode(&env));
 
         for i in 0..keys.len() {
             for j in (i + 1)..keys.len() {

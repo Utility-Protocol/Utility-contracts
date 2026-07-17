@@ -10,3 +10,4 @@ AGENTS.md
 .agent/
 agents/
 issue.md
+node_modules/

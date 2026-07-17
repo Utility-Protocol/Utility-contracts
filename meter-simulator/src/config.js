@@ -21,6 +21,14 @@ const config = {
     qos: parseInt(process.env.MQTT_QOS) || 1
   },
 
+  // OpenTelemetry-compatible trace context settings
+  observability: {
+    serviceName: process.env.OTEL_SERVICE_NAME || 'meter-simulator',
+    collectorUrl: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318',
+    p99LatencyBudgetMs: parseInt(process.env.TRACE_P99_LATENCY_BUDGET_MS) || 100,
+    sampleRate: parseFloat(process.env.TRACE_SAMPLE_RATE) || 1.0
+  },
+
   // Simulation defaults
   simulation: {
     defaultInterval: 30, // seconds

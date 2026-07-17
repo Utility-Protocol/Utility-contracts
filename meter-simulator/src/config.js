@@ -21,6 +21,13 @@ const config = {
     qos: parseInt(process.env.MQTT_QOS) || 1
   },
 
+  // Per-tenant API rate limiting defaults
+  rateLimit: {
+    capacity: parseInt(process.env.RATE_LIMIT_CAPACITY) || 60,
+    refillRatePerSecond: parseFloat(process.env.RATE_LIMIT_REFILL_PER_SECOND) || 1,
+    idleTtlMs: parseInt(process.env.RATE_LIMIT_IDLE_TTL_MS) || 10 * 60 * 1000
+  },
+
   // Simulation defaults
   simulation: {
     defaultInterval: 30, // seconds

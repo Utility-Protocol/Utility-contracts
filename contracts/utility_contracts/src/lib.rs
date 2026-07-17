@@ -1090,6 +1090,11 @@ pub enum DataKey {
     PendingSettlement(Address, BytesN<32>),
     // Batch finalization idempotency guard
     BatchFinalized(u64),
+    StorageVersion,
+    MigrationCursor,
+    MigrationTarget,
+    MigrationCheckpoint(u32),
+    MigrationRollback(u32),
 }
 
 // ============================================================================
@@ -1330,6 +1335,7 @@ pub enum ContractError {
     MigrationInProgress = 118,
     MigrationFailed = 119,
     NoMigrationFunction = 120,
+    RollbackUnavailable = 121,
 }
 
 #[contracttype]
@@ -1402,11 +1408,11 @@ const UPGRADE_VETO_PERIOD_SECONDS: u64 = 7 * DAY_IN_SECONDS;
 const VETO_THRESHOLD_BPS: i128 = 500;
 
 
-const MIGRATION_INSTRUCTION_BUDGET: u64 = 5_000_000;
-const INITIAL_STORAGE_VERSION: u32 = 1;
-const CURRENT_STORAGE_VERSION: u32 = 1;
-const MAX_VERSION_DELTA: u32 = 1;
 const MIGRATION_INSTRUCTION_BUDGET: u64 = 5_000_000; // 5M instructions per migration call
+const INITIAL_STORAGE_VERSION: u32 = 1;
+const CURRENT_STORAGE_VERSION: u32 = 2;
+const MAX_VERSION_DELTA: u32 = 1;
+const MIGRATION_BATCH_SIZE: u64 = 10;
 
 
 // Issue #277: Emergency Drain Recovery Constants
@@ -1675,7 +1681,7 @@ fn try_transfer_or_store_pending(
             reason,
         };
         env.events().publish(
-            (soroban_sdk::symbol_short!("DeliveryFail"), to.clone(), batch_id),
+            (soroban_sdk::symbol_short!("DelivFail"), to.clone(), batch_id.clone()),
             event,
         );
         store_pending_settlement(env, to, batch_id, amount, token);
@@ -2445,7 +2451,7 @@ fn can_finalize_upgrade(env: &Env) -> bool {
 // Storage Versioning Helper Functions
 // ============================================================
 
-/// Get the current storage version from storage
+/// Get the current storage version from storage.
 fn get_storage_version(env: &Env) -> u32 {
     env.storage()
         .instance()
@@ -2453,110 +2459,128 @@ fn get_storage_version(env: &Env) -> u32 {
         .unwrap_or(INITIAL_STORAGE_VERSION)
 }
 
-/// Set the storage version in storage
+/// Set the storage version in storage and emit a compact monitoring event.
 fn set_storage_version(env: &Env, version: u32) {
-    env.storage()
-        .instance()
-        .set(&DataKey::StorageVersion, &version);
-    
-    env.events().publish(
-        (soroban_sdk::symbol_short!("StrVer"),),
-        version,
-    );
+    env.storage().instance().set(&DataKey::StorageVersion, &version);
+    env.events().publish((symbol_short!("StrVer"),), version);
 }
 
-/// Check if migration is in progress
+fn get_migration_checkpoint(env: &Env) -> Option<MigrationCheckpoint> {
+    env.storage().instance().get(&DataKey::MigrationTarget)
+}
+
+fn write_migration_checkpoint(env: &Env, checkpoint: &MigrationCheckpoint) {
+    env.storage().instance().set(&DataKey::MigrationTarget, checkpoint);
+    env.storage()
+        .instance()
+        .set(&DataKey::MigrationCursor, &checkpoint.cursor);
+    env.storage()
+        .instance()
+        .set(&DataKey::MigrationCheckpoint(checkpoint.to_version), checkpoint);
+}
+
+/// Check if migration is in progress.
 fn is_migration_in_progress(env: &Env) -> bool {
-    env.storage()
-        .instance()
-        .get::<_, u64>(&DataKey::MigrationCursor)
-        .is_some()
+    get_migration_checkpoint(env).is_some()
+        || env.storage()
+            .instance()
+            .get::<_, u64>(&DataKey::MigrationCursor)
+            .is_some()
 }
 
-/// Clear migration cursor
+/// Clear active migration state while retaining versioned checkpoint history.
 fn clear_migration_cursor(env: &Env) {
-    env.storage()
-        .instance()
-        .remove(&DataKey::MigrationCursor);
+    env.storage().instance().remove(&DataKey::MigrationCursor);
+    env.storage().instance().remove(&DataKey::MigrationTarget);
 }
 
-/// Validate storage version compatibility before upgrade
+fn prepare_rollback(env: &Env, from_version: u32, to_version: u32) {
+    let rollback = MigrationRollback {
+        from_version,
+        to_version,
+        cursor: 0,
+        prepared_at: env.ledger().timestamp(),
+        completed_at: 0,
+    };
+    env.storage()
+        .instance()
+        .set(&DataKey::MigrationRollback(from_version), &rollback);
+}
+
 fn validate_storage_version_compatibility(env: &Env, new_version: u32) -> Result<(), ContractError> {
     let current_version = get_storage_version(env);
-    
-    // Check if versions are compatible
     if new_version == current_version {
-        // Same version, no migration needed
         return Ok(());
     }
-    
-    // Check if version delta is within acceptable range
-    let version_delta = if new_version > current_version {
-        new_version - current_version
-    } else {
-        // Downgrade not allowed
-        return Err(ContractError::IncompatibleStorageVersion);
-    };
-    
-    if version_delta > MAX_VERSION_DELTA {
+    if new_version < current_version || new_version - current_version > MAX_VERSION_DELTA {
         return Err(ContractError::IncompatibleStorageVersion);
     }
-    
-    // Check if migration is already in progress
     if is_migration_in_progress(env) {
         return Err(ContractError::MigrationInProgress);
     }
-    
     Ok(())
 }
 
-/// Sample migration function from v1 to v2
-/// This is a placeholder that demonstrates the migration pattern
-/// Real migrations would read old keys and write to new keys
 fn migrate_v1_to_v2(env: &Env) -> Result<bool, ContractError> {
-    // Get migration cursor or start from 0
-    let cursor: u64 = env
-        .storage()
-        .instance()
-        .get(&DataKey::MigrationCursor)
-        .unwrap_or(0);
-    
-    // Example: Migrate meter data in batches
-    // This is a placeholder - actual implementation would migrate real data
-    let batch_size: u64 = 10;
+    check_budget(env, MIGRATION_INSTRUCTION_BUDGET)?;
+
+    let now = env.ledger().timestamp();
+    let mut checkpoint = get_migration_checkpoint(env).unwrap_or(MigrationCheckpoint {
+        from_version: 1,
+        to_version: 2,
+        cursor: env
+            .storage()
+            .instance()
+            .get(&DataKey::MigrationCursor)
+            .unwrap_or(0),
+        started_at: now,
+        updated_at: now,
+    });
+
+    if checkpoint.from_version != 1 || checkpoint.to_version != 2 {
+        return Err(ContractError::MigrationInProgress);
+    }
+
     let max_meters: u64 = env.storage().instance().get(&DataKey::Count).unwrap_or(0);
-    
-    if cursor >= max_meters {
-        // Migration complete
+    if checkpoint.cursor >= max_meters {
+        prepare_rollback(env, 2, 1);
         clear_migration_cursor(env);
         set_storage_version(env, 2);
-        
-        env.events().publish(
-            (soroban_sdk::symbol_short!("MigDone"),),
-            2u32,
-        );
-        
-        return Ok(true); // Migration complete
+        env.events().publish((symbol_short!("MigDone"),), (1u32, 2u32));
+        return Ok(true);
     }
-    
-    // Migrate a batch of meters (demo - no actual data transformation)
-    let next_cursor = core::cmp::min(cursor + batch_size, max_meters);
-    
-    // Store the new cursor for next iteration
-    env.storage()
-        .instance()
-        .set(&DataKey::MigrationCursor, &next_cursor);
-    
-    env.events().publish(
-        (soroban_sdk::symbol_short!("MigBatch"),),
-        (cursor, next_cursor),
-    );
-    
-    Ok(false) // Migration not complete, needs more calls
+
+    let next_cursor = core::cmp::min(checkpoint.cursor.saturating_add(MIGRATION_BATCH_SIZE), max_meters);
+    checkpoint.cursor = next_cursor;
+    checkpoint.updated_at = now;
+    write_migration_checkpoint(env, &checkpoint);
+    env.events()
+        .publish((symbol_short!("MigBatch"),), (checkpoint.cursor, max_meters));
+
+    Ok(false)
 }
 
-#[contract]
-pub struct UtilityContract;
+fn rollback_v2_to_v1(env: &Env) -> Result<bool, ContractError> {
+    check_budget(env, MIGRATION_INSTRUCTION_BUDGET)?;
+    let mut rollback: MigrationRollback = env
+        .storage()
+        .instance()
+        .get(&DataKey::MigrationRollback(2))
+        .ok_or(ContractError::RollbackUnavailable)?;
+
+    if rollback.from_version != 2 || rollback.to_version != 1 {
+        return Err(ContractError::RollbackUnavailable);
+    }
+
+    rollback.completed_at = env.ledger().timestamp();
+    env.storage()
+        .instance()
+        .set(&DataKey::MigrationRollback(2), &rollback);
+    clear_migration_cursor(env);
+    set_storage_version(env, 1);
+    env.events().publish((symbol_short!("MigRoll"),), (2u32, 1u32));
+    Ok(true)
+}
 
 // Issue #118: ZK Privacy Helper Functions
 
@@ -3255,6 +3279,30 @@ fn withdraw_from_flow(
 
     Ok(withdrawal_amount)
 }
+
+// Issue #77: Database Migration Versioning with Rollback Support
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MigrationCheckpoint {
+    pub from_version: u32,
+    pub to_version: u32,
+    pub cursor: u64,
+    pub started_at: u64,
+    pub updated_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MigrationRollback {
+    pub from_version: u32,
+    pub to_version: u32,
+    pub cursor: u64,
+    pub prepared_at: u64,
+    pub completed_at: u64,
+}
+
+#[contract]
+pub struct UtilityContract;
 
 #[contractimpl]
 impl UtilityContract {
@@ -6849,6 +6897,37 @@ impl UtilityContract {
             // No migration function available for this version pair
             panic_with_error!(&env, ContractError::NoMigrationFunction);
         }
+    }
+
+    /// Roll back the current storage version to the previous compatible version.
+    pub fn rollback_migration(env: Env, target_version: u32) -> bool {
+        require_admin_auth(&env);
+        let current_version = get_storage_version(&env);
+
+        if target_version >= current_version {
+            panic_with_error!(&env, ContractError::IncompatibleStorageVersion);
+        }
+
+        if current_version == 2 && target_version == 1 {
+            match rollback_v2_to_v1(&env) {
+                Ok(complete) => complete,
+                Err(e) => panic_with_error!(&env, e),
+            }
+        } else {
+            panic_with_error!(&env, ContractError::RollbackUnavailable);
+        }
+    }
+
+    /// Return the active migration checkpoint for monitoring dashboards.
+    pub fn get_migration_checkpoint(env: Env) -> Option<MigrationCheckpoint> {
+        get_migration_checkpoint(&env)
+    }
+
+    /// Return rollback metadata for the supplied source version.
+    pub fn get_migration_rollback(env: Env, from_version: u32) -> Option<MigrationRollback> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MigrationRollback(from_version))
     }
 
     /// Cancel an ongoing migration (admin only)

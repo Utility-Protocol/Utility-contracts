@@ -262,3 +262,32 @@ fn test_migration_state_consistency() {
         assert!(!client.is_migration_active(), "Migration should not be active after completion");
     }
 }
+
+#[test]
+fn test_migration_checkpoint_and_rollback_metadata() {
+    let (env, contract_id, admin) = setup_test_env();
+    let client = utility_contracts::UtilityContractClient::new(&env, &contract_id);
+
+    client.set_admin(&admin);
+    env.mock_all_auths();
+
+    assert_eq!(client.get_migration_checkpoint(), None);
+
+    let complete = client.run_migration(&2);
+    assert!(complete, "empty fixture migration should complete in one call");
+    assert_eq!(client.get_storage_version_public(), 2);
+
+    let rollback = client
+        .get_migration_rollback(&2)
+        .expect("rollback metadata should be prepared after migration");
+    assert_eq!(rollback.from_version, 2);
+    assert_eq!(rollback.to_version, 1);
+
+    assert!(client.rollback_migration(&1));
+    assert_eq!(client.get_storage_version_public(), 1);
+
+    let completed = client
+        .get_migration_rollback(&2)
+        .expect("completed rollback metadata should remain queryable");
+    assert!(completed.completed_at >= completed.prepared_at);
+}

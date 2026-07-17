@@ -1,0 +1,33 @@
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: utility-contracts-strict-mtls
+  namespace: utility-contracts
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: utility-contracts-service-allowlist
+  namespace: utility-contracts
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+spec:
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            namespaces: ["utility-contracts"]
+      to:
+        - operation:
+            ports: ["8080", "9090"]
+    - from:
+        - source:
+            namespaces: ["istio-system", "monitoring"]
+      to:
+        - operation:
+            ports: ["15020", "9090"]

@@ -1,12 +1,14 @@
 const mqtt = require('mqtt');
 const chalk = require('chalk');
 const config = require('./config');
+const { injectTraceContext, calculateLatencyMs } = require('./trace-context');
 
 class MQTTPublisher {
   constructor(mqttConfig) {
     this.config = mqttConfig;
     this.client = null;
     this.connected = false;
+    this.serviceName = mqttConfig.serviceName || 'meter-simulator';
   }
 
   /**
@@ -80,7 +82,7 @@ class MQTTPublisher {
     }
 
     const topic = this.config.topic.replace('+', usageData.meter_id.toString());
-    const payload = JSON.stringify({
+    const tracePayload = injectTraceContext({
       meter_id: usageData.meter_id,
       timestamp: usageData.timestamp,
       watt_hours_consumed: usageData.display_watt_hours, // Human-readable value
@@ -95,7 +97,13 @@ class MQTTPublisher {
       battery_level: Math.floor(Math.random() * 30) + 70, // 70-100%
       signal_strength: Math.floor(Math.random() * 20) + -80, // -80 to -60 dBm
       temperature: Math.floor(Math.random() * 15) + 20 // 20-35°C
+    }, {
+      parentTraceparent: usageData.traceparent,
+      serviceName: this.serviceName,
+      operation: 'meter.usage.publish',
+      baggage: { device_id: `ESP32-${usageData.meter_id}` }
     });
+    const payload = JSON.stringify(tracePayload);
 
     return new Promise((resolve, reject) => {
       this.client.publish(topic, payload, { qos: this.config.qos }, (error) => {
@@ -103,7 +111,10 @@ class MQTTPublisher {
           console.error(chalk.red('❌ Failed to publish MQTT message:'), error);
           reject(error);
         } else {
+          const latencyMs = calculateLatencyMs(tracePayload.trace_started_at);
+          const budgetStatus = latencyMs <= 100 ? chalk.green(`${latencyMs}ms`) : chalk.yellow(`${latencyMs}ms`);
           console.log(chalk.green(`📤 Published to ${topic}`));
+          console.log(chalk.cyan(`   Trace: ${tracePayload.traceparent} (${budgetStatus} publish path)`));
           console.log(chalk.cyan(`   Payload: ${payload}`));
           resolve();
         }
@@ -120,7 +131,7 @@ class MQTTPublisher {
     }
 
     const topic = `meters/${meterId}/heartbeat`;
-    const payload = JSON.stringify({
+    const tracePayload = injectTraceContext({
       meter_id: meterId,
       timestamp: Math.floor(Date.now() / 1000),
       device_id: `ESP32-${meterId}`,
@@ -130,7 +141,12 @@ class MQTTPublisher {
       temperature: Math.floor(Math.random() * 15) + 20,
       uptime: Math.floor(Math.random() * 86400), // Random uptime in seconds
       memory_usage: Math.floor(Math.random() * 50) + 30 // 30-80%
+    }, {
+      serviceName: this.serviceName,
+      operation: 'meter.heartbeat.publish',
+      baggage: { device_id: `ESP32-${meterId}` }
     });
+    const payload = JSON.stringify(tracePayload);
 
     return new Promise((resolve, reject) => {
       this.client.publish(topic, payload, { qos: 0 }, (error) => {
@@ -175,7 +191,7 @@ class MQTTPublisher {
     }
 
     const topic = `meters/${meterId}/status`;
-    const payload = JSON.stringify({
+    const tracePayload = injectTraceContext({
       meter_id: meterId,
       timestamp: Math.floor(Date.now() / 1000),
       status: status, // 'online', 'offline', 'error', 'maintenance'
@@ -184,7 +200,12 @@ class MQTTPublisher {
       last_reboot: Math.floor(Date.now() / 1000) - Math.floor(Math.random() * 86400),
       error_count: Math.floor(Math.random() * 5),
       last_error: status === 'error' ? 'Sensor malfunction' : null
+    }, {
+      serviceName: this.serviceName,
+      operation: 'meter.status.publish',
+      baggage: { device_id: `ESP32-${meterId}`, status }
     });
+    const payload = JSON.stringify(tracePayload);
 
     return new Promise((resolve, reject) => {
       this.client.publish(topic, payload, { qos: 1 }, (error) => {

@@ -27,6 +27,12 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Run tests
         run: cargo test
+      - name: Install coverage tooling
+        run: cargo install cargo-llvm-cov --locked
+      - name: Enforce coverage threshold
+        env:
+          COVERAGE_THRESHOLD: 80
+        run: scripts/coverage.sh
       - name: Fuzz test detection
         run: |
           if [ -d "contracts/utility_contracts/fuzz" ]; then

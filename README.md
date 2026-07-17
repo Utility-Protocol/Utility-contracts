@@ -91,6 +91,19 @@ Verified via 15 property tests with 100+ randomized cases each, covering pause/r
 
 ## Development
 
+### One-command local onboarding
+
+Run the repository onboarding script before your first local build. It validates Git, ripgrep, Rust/Cargo, rustup, the WASM target, Node.js, and npm; installs npm dependencies for the JavaScript workspaces unless skipped; and prints the recommended validation commands.
+
+```bash
+./scripts/onboard.sh
+
+# Validate prerequisites without installing dependencies
+./scripts/onboard.sh --check-only
+```
+
+### Manual build and test commands
+
 ```bash
 # Build
 cd contracts && cargo build --target wasm32-unknown-unknown --release

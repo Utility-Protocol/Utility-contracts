@@ -135,14 +135,15 @@ impl InsurancePoolDemo {
             claimant: claimant.clone(),
             amount,
             auto_approved,
-            is_processed: auto_approved,
+            is_processed: false, // Start as false so process_claim can transition it
         };
+
+        self.claims.insert(claim_id, claim);
 
         if auto_approved {
             self.process_claim(claim_id)?;
         }
 
-        self.claims.insert(claim_id, claim);
         Ok(claim_id)
     }
 

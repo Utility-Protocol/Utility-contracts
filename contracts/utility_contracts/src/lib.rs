@@ -189,6 +189,28 @@ pub struct ReadingRejected {
     pub timestamp: u64,
 }
 
+/// Tamper-evident audit trail entry chained to the previous entry hash.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditRecord {
+    /// Monotonic sequence number for the contract-wide audit stream.
+    pub sequence: u64,
+    /// Previous record hash, or all zeroes for the genesis record.
+    pub previous_hash: BytesN<32>,
+    /// Hash of this record's canonical payload.
+    pub record_hash: BytesN<32>,
+    /// Service operation being audited, e.g. register/topup/deduct/claim.
+    pub action: Symbol,
+    /// Primary subject identifier for the event, usually a meter or stream id.
+    pub subject_id: u64,
+    /// Account that authorized or initiated the audited operation.
+    pub actor: Address,
+    /// Ledger timestamp at the point the audit record was appended.
+    pub timestamp: u64,
+    /// Domain-specific payload digest for compact, privacy-preserving verification.
+    pub payload_hash: BytesN<32>,
+}
+
 /// Emitted when the deposit is slashed at 100 % utilisation.
 #[contracttype]
 #[derive(Clone)]
@@ -1090,6 +1112,9 @@ pub enum DataKey {
     PendingSettlement(Address, BytesN<32>),
     // Batch finalization idempotency guard
     BatchFinalized(u64),
+    // Tamper-evident audit trail
+    AuditHead,
+    AuditRecord(u64),
 }
 
 // ============================================================================
@@ -1330,6 +1355,8 @@ pub enum ContractError {
     MigrationInProgress = 118,
     MigrationFailed = 119,
     NoMigrationFunction = 120,
+    AuditRecordMissing = 121,
+    AuditChainBroken = 122,
 }
 
 #[contracttype]
@@ -1462,6 +1489,78 @@ const MAX_HEAT_DELTA: i128 = 100 * 1_000_000_00; // 100 units per 5-min interval
 // Pending settlement constants
 const PENDING_CLAIM_TTL: u64 = 30 * 86400; // 30 days
 const MAX_PENDING: usize = 10; // Max pending failures per batch
+
+fn zero_hash(env: &Env) -> BytesN<32> {
+    BytesN::from_array(env, &[0u8; 32])
+}
+
+fn audit_payload_hash<T: soroban_sdk::xdr::ToXdr>(env: &Env, payload: &T) -> BytesN<32> {
+    env.crypto().sha256(&payload.to_xdr(env)).into()
+}
+
+fn calculate_audit_record_hash(
+    env: &Env,
+    sequence: u64,
+    previous_hash: &BytesN<32>,
+    action: &Symbol,
+    subject_id: u64,
+    actor: &Address,
+    timestamp: u64,
+    payload_hash: &BytesN<32>,
+) -> BytesN<32> {
+    let material = (
+        sequence,
+        previous_hash.clone(),
+        action.clone(),
+        subject_id,
+        actor.clone(),
+        timestamp,
+        payload_hash.clone(),
+    );
+    env.crypto().sha256(&material.to_xdr(env)).into()
+}
+
+fn append_audit_record(
+    env: &Env,
+    action: Symbol,
+    subject_id: u64,
+    actor: Address,
+    payload_hash: BytesN<32>,
+) -> AuditRecord {
+    let previous: Option<AuditRecord> = env.storage().instance().get(&DataKey::AuditHead);
+    let (sequence, previous_hash) = match previous {
+        Some(record) => (record.sequence.saturating_add(1), record.record_hash),
+        None => (1, zero_hash(env)),
+    };
+    let timestamp = env.ledger().timestamp();
+    let record_hash = calculate_audit_record_hash(
+        env,
+        sequence,
+        &previous_hash,
+        &action,
+        subject_id,
+        &actor,
+        timestamp,
+        &payload_hash,
+    );
+    let record = AuditRecord {
+        sequence,
+        previous_hash,
+        record_hash,
+        action,
+        subject_id,
+        actor,
+        timestamp,
+        payload_hash,
+    };
+    env.storage()
+        .instance()
+        .set(&DataKey::AuditRecord(sequence), &record);
+    env.storage().instance().set(&DataKey::AuditHead, &record);
+    env.events()
+        .publish((Symbol::new(env, "AuditTrail"), subject_id), record.clone());
+    record
+}
 
 /// Validate Ed25519 public key byte array
 /// Ensures correct length and non-zero values
@@ -4978,6 +5077,8 @@ impl UtilityContract {
 
         env.storage().instance().set(&DataKey::Meter(count), &meter);
         env.storage().instance().set(&DataKey::Count, &count);
+        let payload_hash = audit_payload_hash(&env, &(count, off_peak_rate, priority_index, resource_type));
+        append_audit_record(&env, Symbol::new(&env, "register_meter"), count, meter.user.clone(), payload_hash);
         count
     }
 
@@ -5071,6 +5172,9 @@ impl UtilityContract {
         env.storage()
             .instance()
             .set(&DataKey::Meter(meter_id), &meter);
+
+        let payload_hash = audit_payload_hash(&env, &(amount, converted_amount, meter.balance, meter.debt));
+        append_audit_record(&env, Symbol::new(&env, "top_up"), meter_id, contributor, payload_hash);
 
         // Emit conversion event
         env.events().publish(
@@ -5413,11 +5517,75 @@ impl UtilityContract {
             .instance()
             .set(&DataKey::Meter(signed_data.meter_id), &meter);
 
+        let payload_hash = audit_payload_hash(&env, &(signed_data.timestamp, signed_data.units_consumed, cost));
+        append_audit_record(&env, Symbol::new(&env, "deduct_units"), signed_data.meter_id, meter.provider.clone(), payload_hash);
+
         // Emit UsageReported event
         env.events().publish(
             (Symbol::new(&env, "UsageReported"), signed_data.meter_id),
             (signed_data.units_consumed, cost),
         );
+    }
+
+    /// Return the current audit-chain head for off-chain monitors.
+    pub fn get_audit_head(env: Env) -> Option<AuditRecord> {
+        env.storage().instance().get(&DataKey::AuditHead)
+    }
+
+    /// Return an audit record by sequence number for verification or dashboard indexing.
+    pub fn get_audit_record(env: Env, sequence: u64) -> Option<AuditRecord> {
+        env.storage().instance().get(&DataKey::AuditRecord(sequence))
+    }
+
+    /// Verify the audit hash chain between two inclusive sequence numbers.
+    pub fn verify_audit_chain(env: Env, start_sequence: u64, end_sequence: u64) -> bool {
+        if start_sequence == 0 || end_sequence < start_sequence {
+            return false;
+        }
+
+        let mut expected_previous = if start_sequence == 1 {
+            zero_hash(&env)
+        } else if let Some(previous) = env
+            .storage()
+            .instance()
+            .get::<DataKey, AuditRecord>(&DataKey::AuditRecord(start_sequence - 1))
+        {
+            previous.record_hash
+        } else {
+            return false;
+        };
+
+        let mut sequence = start_sequence;
+        while sequence <= end_sequence {
+            let Some(record) = env
+                .storage()
+                .instance()
+                .get::<DataKey, AuditRecord>(&DataKey::AuditRecord(sequence))
+            else {
+                return false;
+            };
+
+            if record.sequence != sequence || record.previous_hash != expected_previous {
+                return false;
+            }
+
+            let expected_hash = calculate_audit_record_hash(
+                &env,
+                record.sequence,
+                &record.previous_hash,
+                &record.action,
+                record.subject_id,
+                &record.actor,
+                record.timestamp,
+                &record.payload_hash,
+            );
+            if record.record_hash != expected_hash {
+                return false;
+            }
+            expected_previous = record.record_hash;
+            sequence = sequence.saturating_add(1);
+        }
+        true
     }
 
     pub fn claim(env: Env, meter_id: u64) {

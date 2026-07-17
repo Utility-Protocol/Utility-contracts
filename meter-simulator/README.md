@@ -252,3 +252,66 @@ MIT License - see LICENSE file for details.
 - 📖 [Utility-Protocol Documentation](../README.md)
 - 🐛 [Issues](https://github.com/Utility-Protocol/Utility-contracts/issues)
 - 💬 [Discussions](https://github.com/Utility-Protocol/Utility-contracts/discussions)
+
+## PostgreSQL Pool Health Probe and Adaptive Sizing
+
+The simulator now includes a reusable PostgreSQL pool health probe for services that depend on database-backed ingestion, telemetry, or settlement workers. The probe is intentionally dependency-light: pass any `pg.Pool`-compatible object with a `query(sql)` method and the standard pool counters (`totalCount`, `idleCount`, and `waitingCount`).
+
+### Architecture
+
+1. **Health probe** runs `SELECT 1` (or `POSTGRES_HEALTH_PROBE_SQL`) under a strict timeout.
+2. **Metrics snapshot** captures total, idle, waiting, utilization, and rolling P99 latency.
+3. **Adaptive sizing** recommends scale-up when P99 exceeds the 100ms target, utilization is high, or clients are waiting; it recommends scale-down only when utilization is low and no clients are queued.
+4. **Cooldown guard** prevents pool-size oscillation during short-lived traffic spikes.
+5. **Monitoring contract** exposes status values of `healthy`, `degraded`, and `unhealthy` for dashboards and alert rules.
+
+### Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `POSTGRES_HEALTH_PROBE_SQL` | SQL used for liveness checks | `SELECT 1` |
+| `POSTGRES_HEALTH_TIMEOUT_MS` | Probe timeout | `75` |
+| `POSTGRES_TARGET_P99_MS` | Critical-path latency target | `100` |
+| `POSTGRES_POOL_MIN` | Minimum recommended pool size | `2` |
+| `POSTGRES_POOL_MAX` | Maximum recommended pool size | `20` |
+| `POSTGRES_SCALE_UP_THRESHOLD` | Utilization threshold for scale up | `0.8` |
+| `POSTGRES_SCALE_DOWN_THRESHOLD` | Utilization threshold for scale down | `0.25` |
+| `POSTGRES_RESIZE_COOLDOWN_MS` | Minimum time between size changes | `30000` |
+
+### Example
+
+```js
+const { Pool } = require('pg');
+const PostgresPoolHealthProbe = require('./src/postgres-pool-health');
+const config = require('./src/config');
+
+const pool = new Pool({ max: config.postgresql.maxPoolSize });
+const probe = new PostgresPoolHealthProbe(pool, {
+  timeoutMs: config.postgresql.healthTimeoutMs,
+  targetP99Ms: config.postgresql.targetP99Ms,
+  minSize: config.postgresql.minPoolSize,
+  maxSize: config.postgresql.maxPoolSize
+});
+
+setInterval(async () => {
+  const health = await probe.check();
+  console.log(JSON.stringify(health));
+}, 10000);
+```
+
+### Monitoring and Alerting
+
+Recommended production alerts:
+
+- Page when `status="unhealthy"` for 2 consecutive probes.
+- Warn when rolling P99 probe latency exceeds `POSTGRES_TARGET_P99_MS` for 5 minutes.
+- Warn when `waitingClients > 0` for 3 minutes.
+- Warn when the adaptive recommendation stays at `maxPoolSize` for 10 minutes, which indicates database capacity or query tuning work is needed.
+
+### Runbook
+
+1. Confirm the database endpoint, credentials, and network path are healthy.
+2. Check pool metrics: utilization, waiting clients, and rolling P99 latency.
+3. If waiting clients are non-zero and database CPU/IO have headroom, apply the scale-up recommendation using a blue-green or canary rollout.
+4. If the pool is at maximum size, inspect slow queries and database saturation before increasing limits.
+5. During recovery, keep canaries below 10% traffic until `healthy` status and P99 below 100ms are stable for at least 15 minutes.

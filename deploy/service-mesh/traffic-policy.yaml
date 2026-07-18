@@ -1,0 +1,65 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: utility-contracts-blue-green
+  namespace: utility-contracts
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+spec:
+  hosts:
+    - api.utility-contracts.example.com
+    - utility-api.utility-contracts.svc.cluster.local
+  gateways:
+    - utility-contracts-gateway
+    - mesh
+  http:
+    - name: canary
+      match:
+        - headers:
+            x-canary:
+              exact: "true"
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: green
+          weight: 100
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+    - name: primary
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: blue
+          weight: 100
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: green
+          weight: 0
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: utility-api-subsets
+  namespace: utility-contracts
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+spec:
+  host: utility-api.utility-contracts.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+  subsets:
+    - name: blue
+      labels:
+        deployment-slot: blue
+    - name: green
+      labels:
+        deployment-slot: green

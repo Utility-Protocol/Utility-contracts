@@ -1,12 +1,14 @@
 const mqtt = require('mqtt');
 const chalk = require('chalk');
 const config = require('./config');
+const { PerTenantRateLimiter } = require('./rate-limiter');
 
 class MQTTPublisher {
   constructor(mqttConfig) {
     this.config = mqttConfig;
     this.client = null;
     this.connected = false;
+    this.rateLimiter = new PerTenantRateLimiter(config.rateLimit);
   }
 
   /**
@@ -79,6 +81,8 @@ class MQTTPublisher {
       throw new Error('Not connected to MQTT broker');
     }
 
+    this.rateLimiter.assertAllowed(`meter:${usageData.meter_id}`);
+
     const topic = this.config.topic.replace('+', usageData.meter_id.toString());
     const payload = JSON.stringify({
       meter_id: usageData.meter_id,
@@ -118,6 +122,8 @@ class MQTTPublisher {
     if (!this.connected) {
       throw new Error('Not connected to MQTT broker');
     }
+
+    this.rateLimiter.assertAllowed(`meter:${meterId}:heartbeat`, 0.2);
 
     const topic = `meters/${meterId}/heartbeat`;
     const payload = JSON.stringify({
@@ -173,6 +179,8 @@ class MQTTPublisher {
     if (!this.connected) {
       throw new Error('Not connected to MQTT broker');
     }
+
+    this.rateLimiter.assertAllowed(`meter:${meterId}:status`, 0.5);
 
     const topic = `meters/${meterId}/status`;
     const payload = JSON.stringify({

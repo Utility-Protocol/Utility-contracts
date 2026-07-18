@@ -52,6 +52,7 @@ The Utility-Protocol Contracts platform provides a decentralized utility streami
 | #261 | Utility-Tariff Oracle | Enables complex pricing models with seamless rate transitions |
 | #262 | Ghost Stream Sweeper | Reduces ledger footprint while maintaining historical integrity |
 | #263 | Documentation Sweep | Enterprise-grade documentation for audit readiness |
+| #68  | Kafka Lag Monitor & Scaler | System-wide real-time Kafka consumer lag monitoring and auto-scaling |
 
 ---
 
@@ -449,6 +450,32 @@ stellar contract invoke \
   verify_archive_integrity \
   --stream-id <stream_id>
 ```
+
+---
+
+## 17.1 Scenario N — Kafka Consumer Group Lag Spike (New)
+
+### Detection Indicators
+- `Group Lag Alert` (Warning/Critical) triggered in the System Monitoring Suite.
+- Large backlog of unprocessed telemetry, delayed settlements, or pending billing updates.
+
+### Response Procedures
+1. **Analyze Lag on Dashboard:** Inspect the **Kafka Lag & Auto-Scaler** tab to identify bottlenecked partitions.
+2. **Override Settings:** Securely lift the `MAX_CONSUMERS` ceiling to scale capacity immediately:
+```bash
+stellar contract invoke --id $CONTRACT --network testnet --source $ADMIN_KEY -- override_kafka_scaler_config --max_consumers 16 --target_lag_per_consumer 250
+```
+3. **Verify Rebalance:** Confirm the `REBALANCE` completes within the 3-second penalty window using the audit logs.
+
+## 17.2 Scenario O — Kafka Auto-Scaling Actuator Failure (New)
+
+### Detection Indicators
+- `LIMIT_REACHED` logged in event stream with high lag.
+- Actuator endpoint reports credential expiration or `503 Service Unavailable`.
+
+### Response Procedures
+1. **Manual Scale Actuation:** Force scaling via docker/kubernetes direct provisioning to handle backlogs.
+2. **Prioritize Topics:** Suspend green-grant topics to give maximum CPU resources to the main prepaid billing queue.
 
 ---
 

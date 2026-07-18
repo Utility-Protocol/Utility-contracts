@@ -68,6 +68,11 @@ Example: off_peak = 10 tokens/sec
 | 20:59    | 75,599  | PEAK |
 | 21:00    | 75,600  | OFF-PEAK |
 
+
+### Observability
+
+The meter simulator propagates W3C Trace Context metadata in MQTT usage and heartbeat payloads, and the dashboard includes trace health indicators for the 100 ms P99 critical-path target. See [Distributed Tracing and Trace Context Propagation](docs/DISTRIBUTED_TRACING.md) for architecture, rollout, alerting, security review, and runbook guidance.
+
 ### Gas Buffer
 
 Ensures 100% service availability during network congestion.

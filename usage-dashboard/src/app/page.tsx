@@ -5,8 +5,10 @@ import { Zap, DollarSign, TrendingUp, Activity, Server, Sliders, ListFilter, Ale
 import StatsCard from '@/components/StatsCard';
 import UsageChart from '@/components/UsageChart';
 import MeterInfo from '@/components/MeterInfo';
-import { UsageData, MeterData, DashboardStats } from '@/types';
+import { UsageData, MeterData, DashboardStats, CapacityPlan } from '@/types';
 import { generateMockUsageData, generateMockMeterData, calculateStats, updateUsageData } from '@/lib/mockData';
+import { buildCapacityPlan } from '@/lib/capacityPlanning';
+import CapacityPlanningPanel from '@/components/CapacityPlanningPanel';
 
 // Import Kafka Monitor
 import { KafkaMonitorAndScaler, ScalingEvent, AlertPayload } from '@/lib/kafka-monitor';
@@ -19,6 +21,7 @@ export default function Home() {
   const [meterData, setMeterData] = useState<MeterData | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isRealTime, setIsRealTime] = useState(true);
+  const [capacityPlan, setCapacityPlan] = useState<CapacityPlan | null>(null);
 
   // --- Kafka Monitor Tab State ---
   const [partitionCount, setPartitionCount] = useState<number>(8);
@@ -39,6 +42,7 @@ export default function Home() {
     const initialUsageData = generateMockUsageData();
     const initialMeterData = generateMockMeterData();
     const initialStats = calculateStats(initialUsageData);
+    const initialCapacityPlan = buildCapacityPlan(initialUsageData);
     
     setUsageData(initialUsageData);
     setMeterData(initialMeterData);
@@ -71,6 +75,7 @@ export default function Home() {
       setUsageData(prevData => {
         const newData = updateUsageData(prevData);
         setStats(calculateStats(newData));
+        setCapacityPlan(buildCapacityPlan(newData));
         return newData;
       });
     }, 5000);
@@ -612,6 +617,32 @@ export default function Home() {
                     )}
                   </tbody>
                 </table>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Trace P99 Latency</span>
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  stats.traceP99LatencyMs <= 100
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {stats.traceP99LatencyMs} ms
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Invalid Trace Contexts</span>
+                <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+                  {stats.invalidTraceContexts}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">OTel Exporter</span>
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  stats.otelExporterHealthy
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {stats.otelExporterHealthy ? 'Healthy' : 'Degraded'}
+                </span>
               </div>
             </div>
           </div>

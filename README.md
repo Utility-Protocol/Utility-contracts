@@ -98,6 +98,9 @@ cd contracts && cargo build --target wasm32-unknown-unknown --release
 # Test
 cargo test
 
+# Coverage (requires cargo-llvm-cov)
+COVERAGE_THRESHOLD=80 scripts/coverage.sh
+
 # Lint
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
@@ -115,7 +118,8 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) automatically runs on:
 2. **Code Quality**: `cargo fmt --all -- --check` + `cargo clippy --target wasm32-unknown-unknown -- -D warnings`
 3. **Build**: `cargo build --target wasm32-unknown-unknown --release`
 4. **Unit Tests**: `cargo test` including fuzz tests
-5. **Fuzz Tests**: Auto-detection and validation of fuzz infrastructure
+5. **Coverage Gate**: `scripts/coverage.sh` enforces the configured line coverage threshold (`COVERAGE_THRESHOLD`, default 80%) for both the root package and contracts workspace
+6. **Fuzz Tests**: Auto-detection and validation of fuzz infrastructure
 
 ### Local Development
 
@@ -124,6 +128,7 @@ cargo fmt --all -- --check
 cargo clippy --target wasm32-unknown-unknown -- -D warnings
 cargo build --target wasm32-unknown-unknown --release
 cargo test
+COVERAGE_THRESHOLD=80 scripts/coverage.sh
 ```
 
 ## ZK-SNARK Circuits for Sensor Privacy

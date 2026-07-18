@@ -5,24 +5,29 @@ import { Zap, DollarSign, TrendingUp, Activity } from 'lucide-react';
 import StatsCard from '@/components/StatsCard';
 import UsageChart from '@/components/UsageChart';
 import MeterInfo from '@/components/MeterInfo';
-import { UsageData, MeterData, DashboardStats } from '@/types';
+import { UsageData, MeterData, DashboardStats, CapacityPlan } from '@/types';
 import { generateMockUsageData, generateMockMeterData, calculateStats, updateUsageData } from '@/lib/mockData';
+import { buildCapacityPlan } from '@/lib/capacityPlanning';
+import CapacityPlanningPanel from '@/components/CapacityPlanningPanel';
 
 export default function Home() {
   const [usageData, setUsageData] = useState<UsageData[]>([]);
   const [meterData, setMeterData] = useState<MeterData | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isRealTime, setIsRealTime] = useState(true);
+  const [capacityPlan, setCapacityPlan] = useState<CapacityPlan | null>(null);
 
   // Initialize data
   useEffect(() => {
     const initialUsageData = generateMockUsageData();
     const initialMeterData = generateMockMeterData();
     const initialStats = calculateStats(initialUsageData);
+    const initialCapacityPlan = buildCapacityPlan(initialUsageData);
     
     setUsageData(initialUsageData);
     setMeterData(initialMeterData);
     setStats(initialStats);
+    setCapacityPlan(initialCapacityPlan);
   }, []);
 
   // Real-time updates
@@ -33,6 +38,7 @@ export default function Home() {
       setUsageData(prevData => {
         const newData = updateUsageData(prevData);
         setStats(calculateStats(newData));
+        setCapacityPlan(buildCapacityPlan(newData));
         return newData;
       });
     }, 5000); // Update every 5 seconds
@@ -40,7 +46,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isRealTime]);
 
-  if (!stats || !meterData) {
+  if (!stats || !meterData || !capacityPlan) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">
@@ -144,6 +150,11 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Capacity planning forecast */}
+        <div className="mt-8">
+          <CapacityPlanningPanel plan={capacityPlan} />
+        </div>
+
         {/* Additional Info Section */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="chart-container">
@@ -185,6 +196,32 @@ export default function Home() {
                 <span className="text-sm text-gray-600">Data Updates</span>
                 <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
                   Real-time
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Trace P99 Latency</span>
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  stats.traceP99LatencyMs <= 100
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {stats.traceP99LatencyMs} ms
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Invalid Trace Contexts</span>
+                <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+                  {stats.invalidTraceContexts}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">OTel Exporter</span>
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  stats.otelExporterHealthy
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {stats.otelExporterHealthy ? 'Healthy' : 'Degraded'}
                 </span>
               </div>
             </div>

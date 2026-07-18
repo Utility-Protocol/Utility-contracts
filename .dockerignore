@@ -1,0 +1,12 @@
+.git
+.github
+**/target
+**/node_modules
+**/.next
+**/coverage
+**/.turbo
+**/.cache
+**/*.pdb
+**/*.exe
+Dockerfile.ci
+.dockerignore

@@ -1,0 +1,85 @@
+# syntax=docker/dockerfile:1.7
+
+ARG RUST_VERSION=stable
+ARG NODE_VERSION=20
+
+FROM rust:${RUST_VERSION}-bookworm AS rust-base
+WORKDIR /workspace
+RUN rustup target add wasm32-unknown-unknown \
+    && rustup component add rustfmt clippy
+
+FROM rust-base AS rust-root-deps
+COPY Cargo.toml Cargo.lock ./
+COPY main.rs ./main.rs
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/workspace/target \
+    cargo fetch --locked
+
+FROM rust-root-deps AS rust-root-test
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/workspace/target \
+    cargo fmt --all -- --check \
+    && cargo clippy --all-targets --all-features -- -D warnings \
+    && cargo test --locked
+
+FROM rust-base AS contracts-deps
+WORKDIR /workspace/contracts
+COPY contracts/Cargo.toml contracts/Cargo.lock ./
+COPY contracts/common/Cargo.toml ./common/Cargo.toml
+COPY contracts/meter-aggregator/Cargo.toml ./meter-aggregator/Cargo.toml
+COPY contracts/price_oracle/Cargo.toml ./price_oracle/Cargo.toml
+COPY contracts/resource-token/Cargo.toml ./resource-token/Cargo.toml
+COPY contracts/settlement/Cargo.toml ./settlement/Cargo.toml
+COPY contracts/utility_contracts/Cargo.toml ./utility_contracts/Cargo.toml
+RUN for crate in common meter-aggregator price_oracle resource-token settlement utility_contracts; do \
+      mkdir -p "${crate}/src"; \
+      printf 'pub fn placeholder() {}\n' > "${crate}/src/lib.rs"; \
+    done
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/workspace/contracts/target \
+    cargo fetch --locked
+
+FROM contracts-deps AS contracts-test
+WORKDIR /workspace/contracts
+COPY contracts .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/workspace/contracts/target \
+    cargo fmt --all -- --check \
+    && cargo clippy --all-targets --all-features -- -D warnings \
+    && cargo test --locked
+
+FROM contracts-test AS wasm-build
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/workspace/contracts/target \
+    cargo build --target wasm32-unknown-unknown --release --locked
+
+FROM node:${NODE_VERSION}-bookworm-slim AS meter-simulator-deps
+WORKDIR /workspace/meter-simulator
+COPY meter-simulator/package.json ./
+RUN --mount=type=cache,target=/root/.npm npm install
+
+FROM meter-simulator-deps AS meter-simulator-test
+COPY meter-simulator ./
+RUN npm test
+
+FROM node:${NODE_VERSION}-bookworm-slim AS usage-dashboard-deps
+WORKDIR /workspace/usage-dashboard
+COPY usage-dashboard/package.json ./
+RUN --mount=type=cache,target=/root/.npm npm install
+
+FROM usage-dashboard-deps AS usage-dashboard-build
+COPY usage-dashboard ./
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+FROM scratch AS ci-summary
+COPY --from=rust-root-test /workspace/Cargo.toml /rust-root/Cargo.toml
+COPY --from=contracts-test /workspace/contracts/Cargo.toml /contracts/Cargo.toml
+COPY --from=meter-simulator-test /workspace/meter-simulator/package.json /meter-simulator/package.json
+COPY --from=usage-dashboard-build /workspace/usage-dashboard/package.json /usage-dashboard/package.json

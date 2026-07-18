@@ -10,6 +10,36 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  docker-layer-cache:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: rust-root
+            target: rust-root-test
+          - name: contracts
+            target: contracts-test
+          - name: wasm
+            target: wasm-build
+          - name: meter-simulator
+            target: meter-simulator-test
+          - name: usage-dashboard
+            target: usage-dashboard-build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.name }} with GitHub Actions cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ci
+          target: ${{ matrix.target }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
   test-and-lint:
     runs-on: ubuntu-latest
     steps:

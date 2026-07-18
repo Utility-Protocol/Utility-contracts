@@ -21,11 +21,16 @@ const config = {
     qos: parseInt(process.env.MQTT_QOS) || 1
   },
 
-  // Per-tenant API rate limiting defaults
-  rateLimit: {
-    capacity: parseInt(process.env.RATE_LIMIT_CAPACITY) || 60,
-    refillRatePerSecond: parseFloat(process.env.RATE_LIMIT_REFILL_PER_SECOND) || 1,
-    idleTtlMs: parseInt(process.env.RATE_LIMIT_IDLE_TTL_MS) || 10 * 60 * 1000
+  // PostgreSQL pool health probe and adaptive sizing
+  postgresql: {
+    healthProbeSql: process.env.POSTGRES_HEALTH_PROBE_SQL || 'SELECT 1',
+    healthTimeoutMs: parseInt(process.env.POSTGRES_HEALTH_TIMEOUT_MS) || 75,
+    targetP99Ms: parseInt(process.env.POSTGRES_TARGET_P99_MS) || 100,
+    minPoolSize: parseInt(process.env.POSTGRES_POOL_MIN) || 2,
+    maxPoolSize: parseInt(process.env.POSTGRES_POOL_MAX) || 20,
+    scaleUpThreshold: parseFloat(process.env.POSTGRES_SCALE_UP_THRESHOLD) || 0.8,
+    scaleDownThreshold: parseFloat(process.env.POSTGRES_SCALE_DOWN_THRESHOLD) || 0.25,
+    resizeCooldownMs: parseInt(process.env.POSTGRES_RESIZE_COOLDOWN_MS) || 30000
   },
 
   // Simulation defaults

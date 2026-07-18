@@ -5,24 +5,29 @@ import { Zap, DollarSign, TrendingUp, Activity } from 'lucide-react';
 import StatsCard from '@/components/StatsCard';
 import UsageChart from '@/components/UsageChart';
 import MeterInfo from '@/components/MeterInfo';
-import { UsageData, MeterData, DashboardStats } from '@/types';
+import { UsageData, MeterData, DashboardStats, CapacityPlan } from '@/types';
 import { generateMockUsageData, generateMockMeterData, calculateStats, updateUsageData } from '@/lib/mockData';
+import { buildCapacityPlan } from '@/lib/capacityPlanning';
+import CapacityPlanningPanel from '@/components/CapacityPlanningPanel';
 
 export default function Home() {
   const [usageData, setUsageData] = useState<UsageData[]>([]);
   const [meterData, setMeterData] = useState<MeterData | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isRealTime, setIsRealTime] = useState(true);
+  const [capacityPlan, setCapacityPlan] = useState<CapacityPlan | null>(null);
 
   // Initialize data
   useEffect(() => {
     const initialUsageData = generateMockUsageData();
     const initialMeterData = generateMockMeterData();
     const initialStats = calculateStats(initialUsageData);
+    const initialCapacityPlan = buildCapacityPlan(initialUsageData);
     
     setUsageData(initialUsageData);
     setMeterData(initialMeterData);
     setStats(initialStats);
+    setCapacityPlan(initialCapacityPlan);
   }, []);
 
   // Real-time updates
@@ -33,6 +38,7 @@ export default function Home() {
       setUsageData(prevData => {
         const newData = updateUsageData(prevData);
         setStats(calculateStats(newData));
+        setCapacityPlan(buildCapacityPlan(newData));
         return newData;
       });
     }, 5000); // Update every 5 seconds
@@ -40,7 +46,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isRealTime]);
 
-  if (!stats || !meterData) {
+  if (!stats || !meterData || !capacityPlan) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
         <div className="text-center">
@@ -142,6 +148,11 @@ export default function Home() {
           <div className="lg:col-span-1">
             <MeterInfo meterData={meterData} />
           </div>
+        </div>
+
+        {/* Capacity planning forecast */}
+        <div className="mt-8">
+          <CapacityPlanningPanel plan={capacityPlan} />
         </div>
 
         {/* Additional Info Section */}

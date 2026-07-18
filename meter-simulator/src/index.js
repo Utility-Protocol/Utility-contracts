@@ -147,7 +147,10 @@ program
       
       let publisher;
       if (options.mqtt) {
-        publisher = new MQTTPublisher(config.mqtt);
+        publisher = new MQTTPublisher({
+          ...config.mqtt,
+          serviceName: config.observability.serviceName
+        });
         await publisher.connect();
         console.log(chalk.green('📡 Connected to MQTT broker'));
       }
@@ -221,7 +224,10 @@ program
       );
       
       if (options.mqtt) {
-        const publisher = new MQTTPublisher(config.mqtt);
+        const publisher = new MQTTPublisher({
+          ...config.mqtt,
+          serviceName: config.observability.serviceName
+        });
         await publisher.connect();
         await publisher.publishUsageData(usageData);
         await publisher.disconnect();

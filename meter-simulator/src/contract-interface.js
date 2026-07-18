@@ -55,6 +55,7 @@ class ContractInterface {
   async submitUsageData(signedUsageData) {
     try {
       console.log('📤 Submitting usage data to contract...');
+      this.rateLimiter.assertAllowed(`meter:${signedUsageData.meter_id}`);
       
       // Validate the data before submission
       this._validateUsageData(signedUsageData);
@@ -128,6 +129,7 @@ class ContractInterface {
   async submitZkUsageData(zkUsageData) {
     try {
       console.log('📤 Submitting ZK privacy usage report to contract...');
+      this.rateLimiter.assertAllowed(`meter:${zkUsageData.meter_id}`);
       
       // In a real implementation, this would:
       // 1. Create a Soroban transaction

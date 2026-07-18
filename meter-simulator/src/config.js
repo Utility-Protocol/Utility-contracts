@@ -21,12 +21,16 @@ const config = {
     qos: parseInt(process.env.MQTT_QOS) || 1
   },
 
-  // OpenTelemetry-compatible trace context settings
-  observability: {
-    serviceName: process.env.OTEL_SERVICE_NAME || 'meter-simulator',
-    collectorUrl: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318',
-    p99LatencyBudgetMs: parseInt(process.env.TRACE_P99_LATENCY_BUDGET_MS) || 100,
-    sampleRate: parseFloat(process.env.TRACE_SAMPLE_RATE) || 1.0
+  // PostgreSQL pool health probe and adaptive sizing
+  postgresql: {
+    healthProbeSql: process.env.POSTGRES_HEALTH_PROBE_SQL || 'SELECT 1',
+    healthTimeoutMs: parseInt(process.env.POSTGRES_HEALTH_TIMEOUT_MS) || 75,
+    targetP99Ms: parseInt(process.env.POSTGRES_TARGET_P99_MS) || 100,
+    minPoolSize: parseInt(process.env.POSTGRES_POOL_MIN) || 2,
+    maxPoolSize: parseInt(process.env.POSTGRES_POOL_MAX) || 20,
+    scaleUpThreshold: parseFloat(process.env.POSTGRES_SCALE_UP_THRESHOLD) || 0.8,
+    scaleDownThreshold: parseFloat(process.env.POSTGRES_SCALE_DOWN_THRESHOLD) || 0.25,
+    resizeCooldownMs: parseInt(process.env.POSTGRES_RESIZE_COOLDOWN_MS) || 30000
   },
 
   // Simulation defaults

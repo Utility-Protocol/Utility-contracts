@@ -2,6 +2,7 @@ const { Server, Networks, TransactionBuilder, Operation, Asset, Keypair } = requ
 const axios = require('axios');
 const crypto = require('crypto');
 const config = require('./config');
+const { PerTenantRateLimiter } = require('./rate-limiter');
 
 class ContractInterface {
   constructor(contractConfig) {
@@ -10,6 +11,7 @@ class ContractInterface {
     this.horizon = new Server(contractConfig.horizonUrl);
     this.contractId = contractConfig.contractId;
     this.friendbotUrl = contractConfig.friendbotUrl;
+    this.rateLimiter = new PerTenantRateLimiter(config.rateLimit);
   }
 
   /**
@@ -40,6 +42,7 @@ class ContractInterface {
   async submitUsageData(signedUsageData) {
     try {
       console.log('📤 Submitting usage data to contract...');
+      this.rateLimiter.assertAllowed(`meter:${signedUsageData.meter_id}`);
       
       // Validate the data before submission
       this._validateUsageData(signedUsageData);
@@ -104,6 +107,7 @@ class ContractInterface {
   async submitZkUsageData(zkUsageData) {
     try {
       console.log('📤 Submitting ZK privacy usage report to contract...');
+      this.rateLimiter.assertAllowed(`meter:${zkUsageData.meter_id}`);
       
       // In a real implementation, this would:
       // 1. Create a Soroban transaction

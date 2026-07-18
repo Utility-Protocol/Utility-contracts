@@ -1,14 +1,14 @@
 const mqtt = require('mqtt');
 const chalk = require('chalk');
 const config = require('./config');
-const { injectTraceContext, calculateLatencyMs } = require('./trace-context');
+const { PerTenantRateLimiter } = require('./rate-limiter');
 
 class MQTTPublisher {
   constructor(mqttConfig) {
     this.config = mqttConfig;
     this.client = null;
     this.connected = false;
-    this.serviceName = mqttConfig.serviceName || 'meter-simulator';
+    this.rateLimiter = new PerTenantRateLimiter(config.rateLimit);
   }
 
   /**
@@ -81,6 +81,8 @@ class MQTTPublisher {
       throw new Error('Not connected to MQTT broker');
     }
 
+    this.rateLimiter.assertAllowed(`meter:${usageData.meter_id}`);
+
     const topic = this.config.topic.replace('+', usageData.meter_id.toString());
     const tracePayload = injectTraceContext({
       meter_id: usageData.meter_id,
@@ -129,6 +131,8 @@ class MQTTPublisher {
     if (!this.connected) {
       throw new Error('Not connected to MQTT broker');
     }
+
+    this.rateLimiter.assertAllowed(`meter:${meterId}:heartbeat`, 0.2);
 
     const topic = `meters/${meterId}/heartbeat`;
     const tracePayload = injectTraceContext({
@@ -189,6 +193,8 @@ class MQTTPublisher {
     if (!this.connected) {
       throw new Error('Not connected to MQTT broker');
     }
+
+    this.rateLimiter.assertAllowed(`meter:${meterId}:status`, 0.5);
 
     const topic = `meters/${meterId}/status`;
     const tracePayload = injectTraceContext({

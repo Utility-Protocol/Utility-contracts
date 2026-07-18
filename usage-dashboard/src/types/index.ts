@@ -25,6 +25,9 @@ export interface DashboardStats {
   isPeakHour: boolean;
   averageDailyUsage: number;
   averageDailySpend: number;
+  traceP99LatencyMs: number;
+  invalidTraceContexts: number;
+  otelExporterHealthy: boolean;
 }
 
 

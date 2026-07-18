@@ -198,6 +198,32 @@ export default function Home() {
                   Real-time
                 </span>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Trace P99 Latency</span>
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  stats.traceP99LatencyMs <= 100
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {stats.traceP99LatencyMs} ms
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Invalid Trace Contexts</span>
+                <span className="px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+                  {stats.invalidTraceContexts}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">OTel Exporter</span>
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  stats.otelExporterHealthy
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-yellow-100 text-yellow-800'
+                }`}>
+                  {stats.otelExporterHealthy ? 'Healthy' : 'Degraded'}
+                </span>
+              </div>
             </div>
           </div>
         </div>

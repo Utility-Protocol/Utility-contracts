@@ -189,6 +189,28 @@ pub struct ReadingRejected {
     pub timestamp: u64,
 }
 
+/// Tamper-evident audit trail entry chained to the previous entry hash.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditRecord {
+    /// Monotonic sequence number for the contract-wide audit stream.
+    pub sequence: u64,
+    /// Previous record hash, or all zeroes for the genesis record.
+    pub previous_hash: BytesN<32>,
+    /// Hash of this record's canonical payload.
+    pub record_hash: BytesN<32>,
+    /// Service operation being audited, e.g. register/topup/deduct/claim.
+    pub action: Symbol,
+    /// Primary subject identifier for the event, usually a meter or stream id.
+    pub subject_id: u64,
+    /// Account that authorized or initiated the audited operation.
+    pub actor: Address,
+    /// Ledger timestamp at the point the audit record was appended.
+    pub timestamp: u64,
+    /// Domain-specific payload digest for compact, privacy-preserving verification.
+    pub payload_hash: BytesN<32>,
+}
+
 /// Emitted when the deposit is slashed at 100 % utilisation.
 #[contracttype]
 #[derive(Clone)]
@@ -616,12 +638,43 @@ pub struct ZKProof {
 pub struct ZKUsageReport {
     pub commitment: BytesN<32>, // Commitment to usage data
     pub nullifier: BytesN<32>,  // Unique nullifier for this report
-    pub encrypted_usage: Bytes, // Encrypted usage data (for future ZK implementation)
+    pub encrypted_usage: Bytes, // End-to-end encrypted usage payload; plaintext never reaches chain
     pub proof_hash: BytesN<32>, // Hash of the ZK proof
     pub meter_id: u64,          // Meter identifier
     pub billing_cycle: u32,     // Billing cycle number
     pub timestamp: u64,         // Report timestamp
     pub is_verified: bool,      // Verification status
+}
+
+// Issue #91: End-to-End Encryption for Sensitive Payload Fields
+//
+// Smart contracts cannot keep plaintext secrets: every transaction argument and
+// storage value is visible to validators. The contract therefore enforces an
+// E2EE envelope boundary: only ciphertext plus non-sensitive routing metadata is
+// accepted on-chain, while meters/providers exchange plaintext and decrypt keys
+// off-chain. A deterministic commitment lets indexers and auditors correlate a
+// ciphertext without exposing the sensitive payload fields.
+#[contracttype]
+#[derive(Clone)]
+pub struct EncryptedSensitivePayload {
+    pub meter_id: u64,
+    pub field_mask: u32,
+    pub key_id: BytesN<32>,
+    pub nonce: BytesN<12>,
+    pub ciphertext: Bytes,
+    pub aad_hash: BytesN<32>,
+    pub commitment: BytesN<32>,
+    pub submitted_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct SensitivePayloadAccepted {
+    pub meter_id: u64,
+    pub key_id: BytesN<32>,
+    pub commitment: BytesN<32>,
+    pub ciphertext_len: u32,
+    pub submitted_at: u64,
 }
 
 #[contracttype]
@@ -1119,6 +1172,8 @@ pub enum DataKey {
     WithdrawalRequestCount(Address),
     ZKEnabledMeters,
     ZKVerificationKey(u64),
+    MeterEncryptionKey(u64),
+    SensitivePayload(u64, BytesN<32>),
     // Issue #259
     ReputationScore(Address),
     // Issue #256
@@ -1155,6 +1210,9 @@ pub enum DataKey {
     PendingSettlement(Address, BytesN<32>),
     // Batch finalization idempotency guard
     BatchFinalized(u64),
+    // Tamper-evident audit trail
+    AuditHead,
+    AuditRecord(u64),
 }
 
 // ============================================================================
@@ -1395,7 +1453,12 @@ pub enum ContractError {
     MigrationInProgress = 118,
     MigrationFailed = 119,
     NoMigrationFunction = 120,
+    EncryptionKeyNotConfigured = 121,
+    InvalidEncryptedPayload = 122,
+    EncryptedPayloadTooLarge = 123,
+    CommitmentMismatch = 124,
 }
+
 
 #[contracttype]
 #[derive(Clone)]
@@ -1527,6 +1590,69 @@ const MAX_HEAT_DELTA: i128 = 100 * 1_000_000_00; // 100 units per 5-min interval
 // Pending settlement constants
 const PENDING_CLAIM_TTL: u64 = 30 * 86400; // 30 days
 const MAX_PENDING: usize = 10; // Max pending failures per batch
+
+// Issue #91: encrypted sensitive payload validation constants.
+const MAX_ENCRYPTED_PAYLOAD_SIZE: u32 = 1024;
+const SENSITIVE_FIELD_USAGE_READING: u32 = 1 << 0;
+const SENSITIVE_FIELD_LOCATION: u32 = 1 << 1;
+const SENSITIVE_FIELD_DEVICE_DIAGNOSTICS: u32 = 1 << 2;
+const SENSITIVE_FIELD_CUSTOMER_METADATA: u32 = 1 << 3;
+const SENSITIVE_FIELD_MASK_ALL: u32 = SENSITIVE_FIELD_USAGE_READING
+    | SENSITIVE_FIELD_LOCATION
+    | SENSITIVE_FIELD_DEVICE_DIAGNOSTICS
+    | SENSITIVE_FIELD_CUSTOMER_METADATA;
+
+fn calculate_sensitive_payload_commitment(
+    env: &Env,
+    meter_id: u64,
+    field_mask: u32,
+    key_id: &BytesN<32>,
+    nonce: &BytesN<12>,
+    ciphertext: &Bytes,
+    aad_hash: &BytesN<32>,
+) -> BytesN<32> {
+    let material = (
+        meter_id,
+        field_mask,
+        key_id.clone(),
+        nonce.clone(),
+        ciphertext.clone(),
+        aad_hash.clone(),
+    );
+    env.crypto().sha256(&material.to_xdr(env))
+}
+
+fn validate_sensitive_payload_envelope(
+    env: &Env,
+    payload: &EncryptedSensitivePayload,
+) -> Result<(), ContractError> {
+    if payload.meter_id == 0 || payload.field_mask == 0 {
+        return Err(ContractError::InvalidEncryptedPayload);
+    }
+    if payload.field_mask & !SENSITIVE_FIELD_MASK_ALL != 0 {
+        return Err(ContractError::InvalidEncryptedPayload);
+    }
+    if payload.ciphertext.len() == 0 {
+        return Err(ContractError::InvalidEncryptedPayload);
+    }
+    if payload.ciphertext.len() > MAX_ENCRYPTED_PAYLOAD_SIZE {
+        return Err(ContractError::EncryptedPayloadTooLarge);
+    }
+
+    let expected = calculate_sensitive_payload_commitment(
+        env,
+        payload.meter_id,
+        payload.field_mask,
+        &payload.key_id,
+        &payload.nonce,
+        &payload.ciphertext,
+        &payload.aad_hash,
+    );
+    if expected != payload.commitment {
+        return Err(ContractError::CommitmentMismatch);
+    }
+    Ok(())
+}
 
 /// Validate Ed25519 public key byte array
 /// Ensures correct length and non-zero values
@@ -5050,6 +5176,8 @@ impl UtilityContract {
             Symbol::new(&env, "meter.registered"),
             Symbol::new(&env, "INFO"),
         );
+        let payload_hash = audit_payload_hash(&env, &(count, off_peak_rate, priority_index, resource_type));
+        append_audit_record(&env, Symbol::new(&env, "register_meter"), count, meter.user.clone(), payload_hash);
         count
     }
 
@@ -5143,6 +5271,9 @@ impl UtilityContract {
         env.storage()
             .instance()
             .set(&DataKey::Meter(meter_id), &meter);
+
+        let payload_hash = audit_payload_hash(&env, &(amount, converted_amount, meter.balance, meter.debt));
+        append_audit_record(&env, Symbol::new(&env, "top_up"), meter_id, contributor, payload_hash);
 
         // Emit conversion event
         env.events().publish(
@@ -5492,11 +5623,75 @@ impl UtilityContract {
             .instance()
             .set(&DataKey::Meter(signed_data.meter_id), &meter);
 
+        let payload_hash = audit_payload_hash(&env, &(signed_data.timestamp, signed_data.units_consumed, cost));
+        append_audit_record(&env, Symbol::new(&env, "deduct_units"), signed_data.meter_id, meter.provider.clone(), payload_hash);
+
         // Emit UsageReported event
         env.events().publish(
             (Symbol::new(&env, "UsageReported"), signed_data.meter_id),
             (signed_data.units_consumed, cost),
         );
+    }
+
+    /// Return the current audit-chain head for off-chain monitors.
+    pub fn get_audit_head(env: Env) -> Option<AuditRecord> {
+        env.storage().instance().get(&DataKey::AuditHead)
+    }
+
+    /// Return an audit record by sequence number for verification or dashboard indexing.
+    pub fn get_audit_record(env: Env, sequence: u64) -> Option<AuditRecord> {
+        env.storage().instance().get(&DataKey::AuditRecord(sequence))
+    }
+
+    /// Verify the audit hash chain between two inclusive sequence numbers.
+    pub fn verify_audit_chain(env: Env, start_sequence: u64, end_sequence: u64) -> bool {
+        if start_sequence == 0 || end_sequence < start_sequence {
+            return false;
+        }
+
+        let mut expected_previous = if start_sequence == 1 {
+            zero_hash(&env)
+        } else if let Some(previous) = env
+            .storage()
+            .instance()
+            .get::<DataKey, AuditRecord>(&DataKey::AuditRecord(start_sequence - 1))
+        {
+            previous.record_hash
+        } else {
+            return false;
+        };
+
+        let mut sequence = start_sequence;
+        while sequence <= end_sequence {
+            let Some(record) = env
+                .storage()
+                .instance()
+                .get::<DataKey, AuditRecord>(&DataKey::AuditRecord(sequence))
+            else {
+                return false;
+            };
+
+            if record.sequence != sequence || record.previous_hash != expected_previous {
+                return false;
+            }
+
+            let expected_hash = calculate_audit_record_hash(
+                &env,
+                record.sequence,
+                &record.previous_hash,
+                &record.action,
+                record.subject_id,
+                &record.actor,
+                record.timestamp,
+                &record.payload_hash,
+            );
+            if record.record_hash != expected_hash {
+                return false;
+            }
+            expected_previous = record.record_hash;
+            sequence = sequence.saturating_add(1);
+        }
+        true
     }
 
     pub fn claim(env: Env, meter_id: u64) {
@@ -8134,6 +8329,75 @@ impl UtilityContract {
             .unwrap_or(0)
     }
 
+    // ==================== ISSUE #91: E2EE SENSITIVE PAYLOAD FIELDS ====================
+
+    /// Register the active off-chain encryption key identifier for a meter.
+    ///
+    /// The key material itself is never stored on-chain. `key_id` should be a
+    /// SHA-256 fingerprint of the recipient public key or KMS key version used
+    /// by the meter/provider E2EE channel.
+    pub fn set_meter_encryption_key(env: Env, meter_id: u64, key_id: BytesN<32>) {
+        let meter = get_meter_or_panic(&env, meter_id);
+        meter.provider.require_auth();
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MeterEncryptionKey(meter_id), &key_id);
+        env.events()
+            .publish((symbol_short!("E2EEKey"), meter_id), key_id);
+    }
+
+    /// Store an end-to-end encrypted sensitive payload envelope.
+    ///
+    /// The contract validates metadata, ciphertext bounds, key version, and the
+    /// commitment over the envelope, but never receives plaintext or decryption
+    /// keys. This keeps sensitive usage/location/diagnostic fields confidential
+    /// while preserving auditability and replay-resistant indexing.
+    pub fn submit_sensitive_payload(env: Env, payload: EncryptedSensitivePayload) {
+        let meter = get_meter_or_panic(&env, payload.meter_id);
+        meter.provider.require_auth();
+
+        let active_key: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MeterEncryptionKey(payload.meter_id))
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::EncryptionKeyNotConfigured));
+        if active_key != payload.key_id {
+            panic_with_error!(&env, ContractError::InvalidEncryptedPayload);
+        }
+        if payload.submitted_at.saturating_add(MAX_TIMESTAMP_DELAY) < env.ledger().timestamp() {
+            panic_with_error!(&env, ContractError::TimestampTooOld);
+        }
+        if let Err(e) = validate_sensitive_payload_envelope(&env, &payload) {
+            panic_with_error!(&env, e);
+        }
+
+        env.storage().instance().set(
+            &DataKey::SensitivePayload(payload.meter_id, payload.commitment.clone()),
+            &payload,
+        );
+        env.events().publish(
+            (symbol_short!("E2EEData"), payload.meter_id),
+            SensitivePayloadAccepted {
+                meter_id: payload.meter_id,
+                key_id: payload.key_id,
+                commitment: payload.commitment,
+                ciphertext_len: payload.ciphertext.len(),
+                submitted_at: payload.submitted_at,
+            },
+        );
+    }
+
+    pub fn get_sensitive_payload(
+        env: Env,
+        meter_id: u64,
+        commitment: BytesN<32>,
+    ) -> Option<EncryptedSensitivePayload> {
+        env.storage()
+            .instance()
+            .get(&DataKey::SensitivePayload(meter_id, commitment))
+    }
+
     // ==================== ISSUE #118: ZK PRIVACY USAGE REPORTING ====================
 
     pub fn enable_privacy_mode(env: Env, meter_id: u64) {
@@ -9497,3 +9761,78 @@ fn verify_usage_signature(
 // mod test;
 #[cfg(test)]
 mod zk_tests;
+
+#[cfg(test)]
+mod e2ee_sensitive_payload_tests {
+    extern crate std;
+
+    use super::*;
+    use soroban_sdk::{Bytes, BytesN, Env};
+
+    fn valid_payload(env: &Env) -> EncryptedSensitivePayload {
+        let key_id = BytesN::from_array(env, &[7u8; 32]);
+        let nonce = BytesN::from_array(env, &[3u8; 12]);
+        let aad_hash = BytesN::from_array(env, &[9u8; 32]);
+        let ciphertext = Bytes::from_slice(env, &[1, 2, 3, 4, 5]);
+        let commitment = calculate_sensitive_payload_commitment(
+            env,
+            42,
+            SENSITIVE_FIELD_USAGE_READING | SENSITIVE_FIELD_DEVICE_DIAGNOSTICS,
+            &key_id,
+            &nonce,
+            &ciphertext,
+            &aad_hash,
+        );
+        EncryptedSensitivePayload {
+            meter_id: 42,
+            field_mask: SENSITIVE_FIELD_USAGE_READING | SENSITIVE_FIELD_DEVICE_DIAGNOSTICS,
+            key_id,
+            nonce,
+            ciphertext,
+            aad_hash,
+            commitment,
+            submitted_at: 1_700_000_000,
+        }
+    }
+
+    #[test]
+    fn encrypted_payload_envelope_accepts_valid_ciphertext() {
+        let env = Env::default();
+        let payload = valid_payload(&env);
+
+        assert_eq!(validate_sensitive_payload_envelope(&env, &payload), Ok(()));
+    }
+
+    #[test]
+    fn encrypted_payload_envelope_rejects_tampered_commitment() {
+        let env = Env::default();
+        let mut payload = valid_payload(&env);
+        payload.commitment = BytesN::from_array(&env, &[8u8; 32]);
+
+        assert_eq!(
+            validate_sensitive_payload_envelope(&env, &payload),
+            Err(ContractError::CommitmentMismatch)
+        );
+    }
+
+    #[test]
+    fn encrypted_payload_envelope_rejects_unknown_field_bits() {
+        let env = Env::default();
+        let mut payload = valid_payload(&env);
+        payload.field_mask = 1 << 31;
+        payload.commitment = calculate_sensitive_payload_commitment(
+            &env,
+            payload.meter_id,
+            payload.field_mask,
+            &payload.key_id,
+            &payload.nonce,
+            &payload.ciphertext,
+            &payload.aad_hash,
+        );
+
+        assert_eq!(
+            validate_sensitive_payload_envelope(&env, &payload),
+            Err(ContractError::InvalidEncryptedPayload)
+        );
+    }
+}

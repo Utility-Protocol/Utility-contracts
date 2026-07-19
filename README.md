@@ -120,7 +120,8 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) automatically runs on:
 2. **Code Quality**: `cargo fmt --all -- --check` + `cargo clippy --target wasm32-unknown-unknown -- -D warnings`
 3. **Build**: `cargo build --target wasm32-unknown-unknown --release`
 4. **Unit Tests**: `cargo test` including fuzz tests
-5. **Fuzz Tests**: Auto-detection and validation of fuzz infrastructure
+5. **Performance Regression Gate**: Critical-path P99 snapshots are checked against `.github/performance/baseline.json` with a 100ms hard SLO and 10% regression budget
+6. **Fuzz Tests**: Auto-detection and validation of fuzz infrastructure
 
 ### Local Development
 
@@ -129,6 +130,7 @@ cargo fmt --all -- --check
 cargo clippy --target wasm32-unknown-unknown -- -D warnings
 cargo build --target wasm32-unknown-unknown --release
 cargo test
+python3 scripts/performance_regression_gate.py --baseline .github/performance/baseline.json --current .github/performance/baseline.json --max-p99-ms 100 --regression-percent 10
 ```
 
 ## ZK-SNARK Circuits for Sensor Privacy
@@ -144,7 +146,7 @@ Hardware devices (meters) prove consumed energy/water amounts without revealing 
 
 **Optimization**: Pre-computed verification key components, optimized host functions for EC ops, no big-integer WASM arithmetic.
 
-See [EMERGENCY_RUNBOOK.md](EMERGENCY_RUNBOOK.md) for operational procedures and [SECURITY.md](SECURITY.md) for formal verification results.
+See [docs/PERFORMANCE_REGRESSION_CI.md](docs/PERFORMANCE_REGRESSION_CI.md) for the CI performance gate and [EMERGENCY_RUNBOOK.md](EMERGENCY_RUNBOOK.md) for operational procedures and [SECURITY.md](SECURITY.md) for formal verification results.
 
 ## License
 

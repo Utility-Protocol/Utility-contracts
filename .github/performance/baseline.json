@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "critical_paths": {
+    "meter_heartbeat_ingest": { "p99_ms": 72.0 },
+    "usage_settlement": { "p99_ms": 84.0 },
+    "oracle_rate_lookup": { "p99_ms": 38.0 },
+    "dashboard_usage_summary": { "p99_ms": 55.0 }
+  }
+}

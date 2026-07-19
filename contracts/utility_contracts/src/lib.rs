@@ -221,6 +221,69 @@ pub struct GuarantorSlashed {
     pub timestamp: u64,
 }
 
+
+// ============================================================================
+// Issue #73: Structured Logging with OpenTelemetry Semantic Conventions
+// ============================================================================
+
+/// OpenTelemetry-aligned structured log payload emitted as Soroban contract events.
+///
+/// Field names use Rust/Soroban-safe snake_case equivalents of OpenTelemetry
+/// semantic attributes (for example `service_name` maps to `service.name`).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OtelLogRecord {
+    /// OTel `service.name`.
+    pub service_name: Symbol,
+    /// OTel `service.version`.
+    pub service_version: Symbol,
+    /// OTel `deployment.environment.name`.
+    pub deployment_environment_name: Symbol,
+    /// OTel `event.name`.
+    pub event_name: Symbol,
+    /// OTel `event.domain`.
+    pub event_domain: Symbol,
+    /// OTel `log.severity`.
+    pub log_severity: Symbol,
+    /// OTel `enduser.id` scoped to the meter id to avoid leaking PII.
+    pub enduser_id: u64,
+    /// OTel `server.address` represented by the provider account.
+    pub server_address: Address,
+    /// OTel `url.scheme`; used to identify the Soroban execution plane.
+    pub url_scheme: Symbol,
+    /// Ledger timestamp for deterministic ordering.
+    pub timestamp_unix: u64,
+    /// Critical-path duration budget in milliseconds for downstream SLO checks.
+    pub critical_path_budget_ms: u32,
+}
+
+const OTEL_CRITICAL_PATH_BUDGET_MS: u32 = 100;
+
+fn emit_otel_log(
+    env: &Env,
+    meter_id: u64,
+    provider: &Address,
+    event_name: Symbol,
+    severity: Symbol,
+) {
+    let record = OtelLogRecord {
+        service_name: Symbol::new(env, "utility-contracts"),
+        service_version: Symbol::new(env, "0.0.0"),
+        deployment_environment_name: Symbol::new(env, "soroban"),
+        event_name,
+        event_domain: Symbol::new(env, "utility.billing"),
+        log_severity: severity,
+        enduser_id: meter_id,
+        server_address: provider.clone(),
+        url_scheme: Symbol::new(env, "soroban"),
+        timestamp_unix: env.ledger().timestamp(),
+        critical_path_budget_ms: OTEL_CRITICAL_PATH_BUDGET_MS,
+    };
+
+    env.events()
+        .publish((Symbol::new(env, "otel.log"), meter_id), record);
+}
+
 #[cfg(test)]
 mod buffer_tests;
 #[cfg(test)]
@@ -233,6 +296,8 @@ mod fuzz_tests;
 mod ghost_sweeper_tests;
 #[cfg(test)]
 mod nonce_sync_tests;
+#[cfg(test)]
+mod otel_logging_tests;
 #[cfg(test)]
 mod pause_resume_fuzz_tests;
 #[cfg(test)]
@@ -5104,6 +5169,13 @@ impl UtilityContract {
 
         env.storage().instance().set(&DataKey::Meter(count), &meter);
         env.storage().instance().set(&DataKey::Count, &count);
+        emit_otel_log(
+            &env,
+            count,
+            &meter.provider,
+            Symbol::new(&env, "meter.registered"),
+            Symbol::new(&env, "INFO"),
+        );
         let payload_hash = audit_payload_hash(&env, &(count, off_peak_rate, priority_index, resource_type));
         append_audit_record(&env, Symbol::new(&env, "register_meter"), count, meter.user.clone(), payload_hash);
         count
@@ -5207,6 +5279,13 @@ impl UtilityContract {
         env.events().publish(
             (symbol_short!("TokUp"), meter_id),
             (amount, converted_amount),
+        );
+        emit_otel_log(
+            &env,
+            meter_id,
+            &meter.provider,
+            Symbol::new(&env, "meter.top_up"),
+            Symbol::new(&env, "INFO"),
         );
     }
 
@@ -5851,6 +5930,13 @@ impl UtilityContract {
         env.storage()
             .instance()
             .set(&DataKey::Meter(meter_id), &meter);
+        emit_otel_log(
+            &env,
+            meter_id,
+            &meter.provider,
+            Symbol::new(&env, "provider.claim"),
+            Symbol::new(&env, "INFO"),
+        );
     }
 
     pub fn update_usage(env: Env, meter_id: u64, watt_hours_consumed: i128) {
@@ -5885,6 +5971,13 @@ impl UtilityContract {
         env.storage()
             .instance()
             .set(&DataKey::Meter(meter_id), &meter);
+        emit_otel_log(
+            &env,
+            meter_id,
+            &meter.provider,
+            Symbol::new(&env, "usage.updated"),
+            Symbol::new(&env, "INFO"),
+        );
     }
 
     pub fn reset_cycle_usage(env: Env, meter_id: u64) {

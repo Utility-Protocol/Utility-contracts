@@ -82,6 +82,11 @@ Provider-initiated, device-completed firmware updates with Ed25519 signature ver
 
 Verified via 15 property tests with 100+ randomized cases each, covering pause/resume cycles, rounding direction, and overflow protection.
 
+
+### Chaos Engineering in Staging
+
+Staging resilience exercises are governed by the [Chaos Engineering Testing Blueprint](docs/runbooks/chaos-engineering-staging.md). The blueprint defines approved fault scenarios, security guardrails, P99 and availability SLOs, monitoring requirements, and blue-green/canary rollout steps for chaos-enabled staging deployments.
+
 ### Security Properties
 
 - **Nonce sync** prevents replay attacks on IoT heartbeats

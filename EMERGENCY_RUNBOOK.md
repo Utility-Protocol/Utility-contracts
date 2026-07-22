@@ -21,7 +21,9 @@
 10. [Scenario H — Admin Key Compromise](#10-scenario-h--admin-key-compromise)
 11. [Scenario I — Oracle Failure](#11-scenario-i--oracle-failure)
 12. [Scenario J — Velocity Limit Breach / Flash Drain](#12-scenario-j--velocity-limit-breach--flash-drain)
-13. [Post-Incident Procedures](#13-post-incident-procedures)
+13. [Scenario N — Kafka Consumer Group Lag Spike](#13-scenario-n--kafka-consumer-group-lag-spike)
+14. [Scenario O — Kafka Auto-Scaling Actuator Failure](#14-scenario-o--kafka-auto-scaling-actuator-failure)
+15. [Post-Incident Procedures](#15-post-incident-procedures)
 14. [Multi-Sig Signer Reference Card](#14-multi-sig-signer-reference-card)
 15. [Contact Tree](#15-contact-tree)
 
@@ -1009,7 +1011,66 @@ stellar contract invoke \
 
 ---
 
-## 13. Post-Incident Procedures
+## 13. Scenario N — Kafka Consumer Group Lag Spike
+
+**Trigger:** `Group Lag Alert` (Warning/Critical) webhook triggered, or total consumer lag rises past the configured threshold (e.g. 600 or 1000 messages) but the consumer group is unable to reduce queue backlog.
+
+**Goal:** Resume high throughput processing to maintain billing, settlement, and telemetry streams under the P99 latency target (< 100ms).
+
+### Step 1 — Check Cluster Topology and Current Lag
+Review the current partition lag on the Dashboard's **Kafka Lag & Auto-Scaler** tab. Check if a single partition is bottlenecked (indicates partition skew or consumer thread starvation) or if all partitions have rising lag (indicates overall consumer group capacity deficit).
+
+### Step 2 — Verify Active Consumer Count
+Confirm that `activeConsumers` matches the scaling target. If the monitor scaled up to `MAX_CONSUMERS` but the queue continues to grow, execute Step 3.
+
+### Step 3 — Dynamically Adjust Auto-Scaling Parameters (Grid Admin key)
+Use the administrative config override on the dashboard or invoke the configuration override endpoint to temporarily lift max consumer bounds and partition limits:
+```bash
+# Temporarily double max allowed consumers and raise scale thresholds
+# This increases parallelism to flush the queue backlog
+stellar contract invoke \
+  --id $CONTRACT \
+  --network testnet \
+  --source $GRID_ADMIN_KEY \
+  -- \
+  override_kafka_scaler_config \
+  --max_consumers 16 \
+  --target_lag_per_consumer 250
+```
+
+### Step 4 — Check for Unhealthy or Locked Consumers
+If some partitions are completely starved of commits:
+1. Restart stale consumer pods to trigger a partition rebalance.
+2. Monitor the dynamic event logs on the dashboard to verify the `REBALANCE` completes within the 3-second recovery window.
+
+---
+
+## 14. Scenario O — Kafka Auto-Scaling Actuator Failure
+
+**Trigger:** `LIMIT_REACHED` or scale-up commands are formulated by the controller but the underlying container orchestrator (K8s HPA, Docker API, or KEDA) fails to spawn new consumer instances due to resource exhaustion or permission errors.
+
+**Goal:** Fallback to safe limits, isolate non-critical ingestion pipelines, and protect critical utility metering billing paths.
+
+### Step 1 — Verify Actuator Connection
+Verify if the scaling API can receive Bearer-token authorized commands. If the orchestrator is throwing `401 Unauthorized` or `503 Service Unavailable`, proceed with recovery.
+
+### Step 2 — Fallback to Manual Provisioning
+If the auto-scaler controller remains blocked by cooldown or actuator failures, manually spawn consumer instances on local servers:
+```bash
+# Force start backup consumer group instances directly
+docker compose up -d --scale billing-consumer=6
+```
+
+### Step 3 — Divert Non-critical streams
+If resource limits prevent spinning up new consumers, temporarily pause non-critical consumption streams (e.g., carbon-grant matching streams) to direct all available processing power to prepaid/postpaid billing settlement engines:
+```bash
+# Temporarily pause green-grant topics to relieve consumer memory pressure
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name green-grant-events --alter --add-config cleanup.policy=compact
+```
+
+---
+
+## 15. Post-Incident Procedures
 
 Complete these steps for every incident, regardless of severity.
 

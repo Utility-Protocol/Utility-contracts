@@ -10,5 +10,12 @@ AGENTS.md
 .agent/
 agents/
 issue.md
-# JavaScript dependencies
+
+# Node modules
 node_modules/
+**/node_modules/
+**/coverage/
+
+# Next.js build output
+.next/
+**/.next/

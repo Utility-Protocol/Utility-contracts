@@ -10,5 +10,6 @@ AGENTS.md
 .agent/
 agents/
 issue.md
+
 # JavaScript dependencies
 node_modules/

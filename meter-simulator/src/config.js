@@ -21,16 +21,18 @@ const config = {
     qos: parseInt(process.env.MQTT_QOS) || 1
   },
 
-  // PostgreSQL pool health probe and adaptive sizing
-  postgresql: {
-    healthProbeSql: process.env.POSTGRES_HEALTH_PROBE_SQL || 'SELECT 1',
-    healthTimeoutMs: parseInt(process.env.POSTGRES_HEALTH_TIMEOUT_MS) || 75,
-    targetP99Ms: parseInt(process.env.POSTGRES_TARGET_P99_MS) || 100,
-    minPoolSize: parseInt(process.env.POSTGRES_POOL_MIN) || 2,
-    maxPoolSize: parseInt(process.env.POSTGRES_POOL_MAX) || 20,
-    scaleUpThreshold: parseFloat(process.env.POSTGRES_SCALE_UP_THRESHOLD) || 0.8,
-    scaleDownThreshold: parseFloat(process.env.POSTGRES_SCALE_DOWN_THRESHOLD) || 0.25,
-    resizeCooldownMs: parseInt(process.env.POSTGRES_RESIZE_COOLDOWN_MS) || 30000
+  // Cache configuration
+  cache: {
+    enabled: process.env.CACHE_ENABLED !== 'false',
+    defaultTtlSeconds: parseInt(process.env.CACHE_TTL_SECONDS, 10) || 60,
+    meterTtlSeconds: parseInt(process.env.CACHE_METER_TTL_SECONDS, 10) || 30,
+    usageTtlSeconds: parseInt(process.env.CACHE_USAGE_TTL_SECONDS, 10) || 15,
+    keyPrefix: process.env.CACHE_KEY_PREFIX || 'utility:meter-simulator',
+    redis: {
+      enabled: process.env.REDIS_ENABLED === 'true',
+      url: process.env.REDIS_URL || 'redis://localhost:6379',
+      connectTimeoutMs: parseInt(process.env.REDIS_CONNECT_TIMEOUT_MS, 10) || 500
+    }
   },
 
   // Simulation defaults

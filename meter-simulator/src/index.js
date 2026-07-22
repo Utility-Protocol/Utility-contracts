@@ -267,11 +267,27 @@ program
       console.log(chalk.cyan(`⏰ Last Update: ${new Date(meter.last_update * 1000).toLocaleString()}`));
       console.log(chalk.cyan(`📈 Total Usage: ${meter.usage_data.total_watt_hours} Wh`));
       console.log(chalk.cyan(`🔥 Peak Usage: ${meter.usage_data.peak_usage_watt_hours} Wh`));
+      console.log(chalk.gray(`🧠 Cache: ${JSON.stringify(contract.getCacheMetrics())}`));
       
     } catch (error) {
       console.error(chalk.red('❌ Error fetching status:'), error.message);
       process.exit(1);
     }
+  });
+
+// Show cache configuration and runtime guidance for monitoring hooks
+program
+  .command('cache-info')
+  .description('Show cache configuration and monitoring labels')
+  .action(() => {
+    console.log(chalk.blue('🧠 Cache Configuration:'));
+    console.log(chalk.cyan(`Enabled: ${config.cache.enabled ? 'Yes' : 'No'}`));
+    console.log(chalk.cyan(`Default TTL: ${config.cache.defaultTtlSeconds}s`));
+    console.log(chalk.cyan(`Meter TTL: ${config.cache.meterTtlSeconds}s`));
+    console.log(chalk.cyan(`Usage TTL: ${config.cache.usageTtlSeconds}s`));
+    console.log(chalk.cyan(`Redis Enabled: ${config.cache.redis.enabled ? 'Yes' : 'No'}`));
+    console.log(chalk.cyan(`Redis URL: ${config.cache.redis.url}`));
+    console.log(chalk.gray('Metrics labels: cache_hits, cache_misses, cache_sets, cache_deletes, cache_errors'));
   });
 
 program.parse();

@@ -2,7 +2,7 @@ const { Server, Networks, TransactionBuilder, Operation, Asset, Keypair } = requ
 const axios = require('axios');
 const crypto = require('crypto');
 const config = require('./config');
-const { PerTenantRateLimiter } = require('./rate-limiter');
+const CacheLayer = require('./cache-layer');
 
 class ContractInterface {
   constructor(contractConfig) {
@@ -11,7 +11,20 @@ class ContractInterface {
     this.horizon = new Server(contractConfig.horizonUrl);
     this.contractId = contractConfig.contractId;
     this.friendbotUrl = contractConfig.friendbotUrl;
-    this.rateLimiter = new PerTenantRateLimiter(config.rateLimit);
+    this.cacheConfig = contractConfig.cache || config.cache;
+    this.cache = contractConfig.cacheLayer || new CacheLayer(this.cacheConfig);
+    this.cacheConnectPromise = null;
+  }
+
+  async initializeCache() {
+    if (!this.cacheConnectPromise) {
+      this.cacheConnectPromise = this.cache.connect();
+    }
+    await this.cacheConnectPromise;
+  }
+
+  async close() {
+    await this.cache.disconnect();
   }
 
   /**
@@ -54,6 +67,7 @@ class ContractInterface {
       
       // For simulation purposes, we'll simulate the contract call
       const result = await this._simulateContractCall('deduct_units', signedUsageData);
+      await this._invalidateMeterCache(signedUsageData.meter_id);
       
       console.log(`✅ Usage data submitted successfully`);
       console.log(`   Watt Hours: ${signedUsageData.display_watt_hours} Wh`);
@@ -75,8 +89,12 @@ class ContractInterface {
     try {
       console.log(`📊 Fetching meter ${meterId} from contract...`);
       
-      // Simulate contract response
-      const meter = await this._simulateContractCall('get_meter', { meter_id: meterId });
+      await this.initializeCache();
+      const meter = await this.cache.remember(
+        this._cacheKey('meter', meterId),
+        this.cacheConfig.meterTtlSeconds,
+        () => this._simulateContractCall('get_meter', { meter_id: meterId })
+      );
       
       if (!meter) {
         throw new Error('Meter not found');
@@ -94,8 +112,12 @@ class ContractInterface {
    */
   async getUsageData(meterId) {
     try {
-      const usageData = await this._simulateContractCall('get_usage_data', { meter_id: meterId });
-      return usageData;
+      await this.initializeCache();
+      return await this.cache.remember(
+        this._cacheKey('usage', meterId),
+        this.cacheConfig.usageTtlSeconds,
+        () => this._simulateContractCall('get_usage_data', { meter_id: meterId })
+      );
     } catch (error) {
       throw new Error(`Failed to get usage data: ${error.message}`);
     }
@@ -114,6 +136,7 @@ class ContractInterface {
       // 2. Call the submit_zk_usage_report function
       
       const result = await this._simulateContractCall('submit_zk_usage_report', zkUsageData);
+      await this._invalidateMeterCache(zkUsageData.meter_id);
       
       console.log(`✅ ZK Privacy report submitted successfully`);
       console.log(`   Units (Verified): ${zkUsageData.units_consumed}`);
@@ -252,6 +275,25 @@ class ContractInterface {
       default:
         throw new Error(`Unknown contract method: ${method}`);
     }
+  }
+
+  async _invalidateMeterCache(meterId) {
+    if (meterId === undefined || meterId === null) {
+      return;
+    }
+    await this.initializeCache();
+    await Promise.all([
+      this.cache.delete(this._cacheKey('meter', meterId)),
+      this.cache.delete(this._cacheKey('usage', meterId))
+    ]);
+  }
+
+  _cacheKey(type, meterId) {
+    return `${type}:${meterId}`;
+  }
+
+  getCacheMetrics() {
+    return this.cache.getMetrics();
   }
 
   /**

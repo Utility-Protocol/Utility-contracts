@@ -15,6 +15,7 @@ Soroban smart contracts for a decentralized utility metering and streaming proto
 - **Emergency Response** — Circuit breakers, legal freezes, velocity limits, protocol pauses
 - **Dust Sweeper** — Prunes fractional remainders from depleted streams
 - **Grant Stream** — Conservation goals trigger automatic grant matching
+- **Scheduled Backup Verification** — Restore-tested database backups with metrics, alerts, and canary rollout guidance
 
 ## Project Structure
 

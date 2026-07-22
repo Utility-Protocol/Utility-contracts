@@ -114,6 +114,10 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) automatically runs on:
 - **Push to main branch** - Ensures main branch is always tested
 - **Pull Requests to main** - Prevents breaking changes from being merged
 
+### Dependency Vulnerability Scanning
+
+A dedicated GitHub Actions workflow (`.github/workflows/dependency-vulnerability-scan.yml`) runs on pull requests, pushes to `main`, a daily schedule, and manual dispatch. It blocks vulnerable dependency changes with GitHub Dependency Review, audits Rust lockfiles with `cargo audit`, audits Node.js projects with `npm audit`, and publishes a workflow summary for security review. See `docs/runbooks/DEPENDENCY_VULNERABILITY_SCANNING.md` for triage, monitoring, and rollout procedures.
+
 ### Testing Stages
 
 1. **Environment Setup**: Rust toolchain with WASM target, Stellar CLI v25.1.0, dependency caching

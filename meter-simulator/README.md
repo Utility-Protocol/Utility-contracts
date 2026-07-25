@@ -11,6 +11,7 @@ A Node.js CLI tool that mimics an ESP32 sending usage data to the Utility-Protoc
 - 🔗 **Direct Contract Integration**: Submit data directly to Soroban contracts
 - ⚡ **Multiple Simulation Modes**: Realistic, surge, and low consumption patterns
 - 📈 **Real-time Monitoring**: Track meter status and usage statistics
+- 🧠 **Configurable Cache**: In-memory hot cache with optional Redis backing and per-path TTLs
 
 ## Installation
 
@@ -47,7 +48,17 @@ MQTT_PASSWORD=
 # Simulation Settings
 DEFAULT_INTERVAL=30
 BASE_WATT_HOURS=100
+
+# Cache Settings
+CACHE_ENABLED=true
+CACHE_TTL_SECONDS=60
+CACHE_METER_TTL_SECONDS=30
+CACHE_USAGE_TTL_SECONDS=15
+REDIS_ENABLED=false
+REDIS_URL=redis://localhost:6379
 ```
+
+See [Redis Cache Architecture](../docs/REDIS_CACHE_ARCHITECTURE.md) for deployment, monitoring, and rollback guidance.
 
 ## Usage
 
@@ -96,6 +107,12 @@ node src/index.js send-reading \
 
 ```bash
 node src/index.js status --config meter-config.json
+```
+
+### 6. Inspect Cache Settings
+
+```bash
+node src/index.js cache-info
 ```
 
 ## Simulation Modes

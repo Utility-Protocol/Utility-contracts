@@ -27,7 +27,10 @@ Utility-contracts/
 │   │   ├── src/test.rs             # Test suite
 │   │   └── Cargo.toml
 │   └── price_oracle/               # Price oracle contract
+├── webhook-delivery-service/       # High-performance off-chain Webhook service with retry & SSRF shielding (TS)
 ├── meter-simulator/                # Device simulator (JS)
+├── usage-dashboard/                # Real-time Next.js analytics & Webhook monitor dashboard
+├── docs/                           # Architecture, deployment and operational runbooks
 ├── examples/                       # Usage examples
 ├── scripts/                        # Deployment scripts
 ├── .github/workflows/ci.yml        # CI pipeline
@@ -35,6 +38,14 @@ Utility-contracts/
 ├── CONTRIBUTING.md                 # Contribution guidelines
 └── EMERGENCY_RUNBOOK.md            # Emergency procedures
 ```
+
+### Webhook Delivery Service
+
+An enterprise-grade, high-performance off-chain delivery daemon for real-time Soroban alerts (e.g. `LowBalanceAlert`, device tampers).
+- **Performance**: `< 100ms` P99 ingestion latency target via an asynchronous event-driven memory queue.
+- **Robust Security**: Includes HMAC-SHA256 and Ed25519 signature headers, strict replay protection windowing, and thorough SSRF IP/DNS blacklisting.
+- **Resiliency**: Built-in exponential backoff retry schedules with full randomized jitter to survive downstream subscriber downtimes and network drops.
+- **Operational Guides**: See [WEBHOOK_ARCHITECTURE.md](docs/WEBHOOK_ARCHITECTURE.md), [WEBHOOK_DEPLOYMENT.md](docs/WEBHOOK_DEPLOYMENT.md), and [WEBHOOK_RUNBOOK.md](docs/WEBHOOK_RUNBOOK.md).
 
 ## Architecture
 

@@ -1,0 +1,37 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: utility-contracts-mesh-slo
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: utility-contracts.mesh.slo
+      rules:
+        - alert: UtilityContractsMeshP99LatencyHigh
+          expr: histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket{destination_workload_namespace="utility-contracts"}[5m])) by (le, destination_workload)) > 100
+          for: 10m
+          labels:
+            severity: page
+          annotations:
+            summary: "Utility Contracts service mesh P99 latency exceeds 100ms"
+            description: "{{ $labels.destination_workload }} has P99 latency above the critical path target."
+        - alert: UtilityContractsMeshAvailabilityLow
+          expr: 100 * sum(rate(istio_requests_total{destination_workload_namespace="utility-contracts",response_code!~"5.."}[30m])) / sum(rate(istio_requests_total{destination_workload_namespace="utility-contracts"}[30m])) < 99.99
+          for: 10m
+          labels:
+            severity: page
+          annotations:
+            summary: "Utility Contracts mesh availability is below 99.99%"
+            description: "Successful request ratio is below the service availability target."
+        - alert: UtilityContractsMTLSPolicyDrift
+          expr: sum(istio_requests_total{destination_workload_namespace="utility-contracts",connection_security_policy!="mutual_tls"}) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Non-mTLS traffic detected in Utility Contracts namespace"
+            description: "All in-mesh service traffic must use mutual TLS."

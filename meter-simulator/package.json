@@ -11,7 +11,8 @@
     "test": "jest",
     "lint": "eslint src/",
     "ttl-monitor": "node src/ttl-monitor.js",
-    "ttl-check": "node src/ttl-monitor.js --check-only"
+    "ttl-check": "node src/ttl-monitor.js --check-only",
+    "incident-runbook": "node src/incident-runbook.js"
   },
   "keywords": ["iot", "stellar", "soroban", "utility", "meter", "simulator"],
   "author": "Utility-Protocol Team",

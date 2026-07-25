@@ -25,4 +25,36 @@ export interface DashboardStats {
   isPeakHour: boolean;
   averageDailyUsage: number;
   averageDailySpend: number;
+  traceP99LatencyMs: number;
+  invalidTraceContexts: number;
+  otelExporterHealthy: boolean;
+}
+
+
+export type CapacityRiskLevel = 'low' | 'medium' | 'high' | 'critical';
+
+export interface CapacityPlanningConfig {
+  installedCapacityKWhPerDay: number;
+  reserveMarginPercent: number;
+  planningWindowDays: number;
+  growthSafetyFactorPercent: number;
+}
+
+export interface CapacityPlanningPoint {
+  day: number;
+  projectedKWh: number;
+  utilizationPercent: number;
+  riskLevel: CapacityRiskLevel;
+}
+
+export interface CapacityPlan {
+  currentDailyUsageKWh: number;
+  installedCapacityKWhPerDay: number;
+  usableCapacityKWhPerDay: number;
+  utilizationPercent: number;
+  dailyGrowthRatePercent: number;
+  daysUntilCapacityBreach: number | null;
+  recommendedCapacityKWhPerDay: number;
+  riskLevel: CapacityRiskLevel;
+  projected: CapacityPlanningPoint[];
 }

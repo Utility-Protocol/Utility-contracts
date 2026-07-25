@@ -154,11 +154,14 @@ make test
 
 ## 🚀 Contribution Workflow
 
-### 1. Fork and Clone
+### 1. Fork, Clone, and Onboard
 ```bash
 git clone https://github.com/your-username/Utility-contracts.git
 cd Utility-contracts
+./scripts/onboard.sh
 ```
+
+Use `./scripts/onboard.sh --check-only` in CI-like environments where you only want prerequisite validation and do not want dependency installation. The script checks the Rust/Soroban-oriented toolchain, installs the `wasm32-unknown-unknown` target when needed, prepares JavaScript workspaces, and reports follow-up validation commands.
 
 ### 2. Create Feature Branch
 ```bash

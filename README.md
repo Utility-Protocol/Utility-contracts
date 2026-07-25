@@ -15,6 +15,7 @@ Soroban smart contracts for a decentralized utility metering and streaming proto
 - **Emergency Response** — Circuit breakers, legal freezes, velocity limits, protocol pauses
 - **Dust Sweeper** — Prunes fractional remainders from depleted streams
 - **Grant Stream** — Conservation goals trigger automatic grant matching
+- **Scheduled Backup Verification** — Restore-tested database backups with metrics, alerts, and canary rollout guidance
 
 ## Project Structure
 
@@ -27,7 +28,10 @@ Utility-contracts/
 │   │   ├── src/test.rs             # Test suite
 │   │   └── Cargo.toml
 │   └── price_oracle/               # Price oracle contract
+├── webhook-delivery-service/       # High-performance off-chain Webhook service with retry & SSRF shielding (TS)
 ├── meter-simulator/                # Device simulator (JS)
+├── usage-dashboard/                # Real-time Next.js analytics & Webhook monitor dashboard
+├── docs/                           # Architecture, deployment and operational runbooks
 ├── examples/                       # Usage examples
 ├── scripts/                        # Deployment scripts
 ├── .github/workflows/ci.yml        # CI pipeline
@@ -35,6 +39,14 @@ Utility-contracts/
 ├── CONTRIBUTING.md                 # Contribution guidelines
 └── EMERGENCY_RUNBOOK.md            # Emergency procedures
 ```
+
+### Webhook Delivery Service
+
+An enterprise-grade, high-performance off-chain delivery daemon for real-time Soroban alerts (e.g. `LowBalanceAlert`, device tampers).
+- **Performance**: `< 100ms` P99 ingestion latency target via an asynchronous event-driven memory queue.
+- **Robust Security**: Includes HMAC-SHA256 and Ed25519 signature headers, strict replay protection windowing, and thorough SSRF IP/DNS blacklisting.
+- **Resiliency**: Built-in exponential backoff retry schedules with full randomized jitter to survive downstream subscriber downtimes and network drops.
+- **Operational Guides**: See [WEBHOOK_ARCHITECTURE.md](docs/WEBHOOK_ARCHITECTURE.md), [WEBHOOK_DEPLOYMENT.md](docs/WEBHOOK_DEPLOYMENT.md), and [WEBHOOK_RUNBOOK.md](docs/WEBHOOK_RUNBOOK.md).
 
 ## Architecture
 
@@ -57,6 +69,11 @@ Example: off_peak = 10 tokens/sec
 | 20:59    | 75,599  | PEAK |
 | 21:00    | 75,600  | OFF-PEAK |
 
+
+### Observability
+
+The meter simulator propagates W3C Trace Context metadata in MQTT usage and heartbeat payloads, and the dashboard includes trace health indicators for the 100 ms P99 critical-path target. See [Distributed Tracing and Trace Context Propagation](docs/DISTRIBUTED_TRACING.md) for architecture, rollout, alerting, security review, and runbook guidance.
+
 ### Gas Buffer
 
 Ensures 100% service availability during network congestion.
@@ -77,6 +94,11 @@ Provider-initiated, device-completed firmware updates with Ed25519 signature ver
 
 Verified via 15 property tests with 100+ randomized cases each, covering pause/resume cycles, rounding direction, and overflow protection.
 
+
+### Chaos Engineering in Staging
+
+Staging resilience exercises are governed by the [Chaos Engineering Testing Blueprint](docs/runbooks/chaos-engineering-staging.md). The blueprint defines approved fault scenarios, security guardrails, P99 and availability SLOs, monitoring requirements, and blue-green/canary rollout steps for chaos-enabled staging deployments.
+
 ### Security Properties
 
 - **Nonce sync** prevents replay attacks on IoT heartbeats
@@ -90,6 +112,19 @@ Verified via 15 property tests with 100+ randomized cases each, covering pause/r
 - **Contract ID:** `CB7PSJZALNWNX7NLOAM6LOEL4OJZMFPQZJMIYO522ZSACYWXTZIDEDSS`
 
 ## Development
+
+### One-command local onboarding
+
+Run the repository onboarding script before your first local build. It validates Git, ripgrep, Rust/Cargo, rustup, the WASM target, Node.js, and npm; installs npm dependencies for the JavaScript workspaces unless skipped; and prints the recommended validation commands.
+
+```bash
+./scripts/onboard.sh
+
+# Validate prerequisites without installing dependencies
+./scripts/onboard.sh --check-only
+```
+
+### Manual build and test commands
 
 ```bash
 # Build
@@ -108,6 +143,10 @@ cargo clippy --all-targets --all-features -- -D warnings
 The GitHub Actions workflow (`.github/workflows/ci.yml`) automatically runs on:
 - **Push to main branch** - Ensures main branch is always tested
 - **Pull Requests to main** - Prevents breaking changes from being merged
+
+### Dependency Vulnerability Scanning
+
+A dedicated GitHub Actions workflow (`.github/workflows/dependency-vulnerability-scan.yml`) runs on pull requests, pushes to `main`, a daily schedule, and manual dispatch. It blocks vulnerable dependency changes with GitHub Dependency Review, audits Rust lockfiles with `cargo audit`, audits Node.js projects with `npm audit`, and publishes a workflow summary for security review. See `docs/runbooks/DEPENDENCY_VULNERABILITY_SCANNING.md` for triage, monitoring, and rollout procedures.
 
 ### Testing Stages
 

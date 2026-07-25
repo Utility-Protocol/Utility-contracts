@@ -1,0 +1,25 @@
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: utility-contracts-default-mtls
+  namespace: utility-contracts
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+spec:
+  host: "*.utility-contracts.svc.cluster.local"
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 1000
+        connectTimeout: 100ms
+      http:
+        http1MaxPendingRequests: 1024
+        http2MaxRequests: 4096
+        maxRequestsPerConnection: 100
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 5s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50

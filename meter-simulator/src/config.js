@@ -21,6 +21,20 @@ const config = {
     qos: parseInt(process.env.MQTT_QOS) || 1
   },
 
+  // Cache configuration
+  cache: {
+    enabled: process.env.CACHE_ENABLED !== 'false',
+    defaultTtlSeconds: parseInt(process.env.CACHE_TTL_SECONDS, 10) || 60,
+    meterTtlSeconds: parseInt(process.env.CACHE_METER_TTL_SECONDS, 10) || 30,
+    usageTtlSeconds: parseInt(process.env.CACHE_USAGE_TTL_SECONDS, 10) || 15,
+    keyPrefix: process.env.CACHE_KEY_PREFIX || 'utility:meter-simulator',
+    redis: {
+      enabled: process.env.REDIS_ENABLED === 'true',
+      url: process.env.REDIS_URL || 'redis://localhost:6379',
+      connectTimeoutMs: parseInt(process.env.REDIS_CONNECT_TIMEOUT_MS, 10) || 500
+    }
+  },
+
   // Simulation defaults
   simulation: {
     defaultInterval: 30, // seconds

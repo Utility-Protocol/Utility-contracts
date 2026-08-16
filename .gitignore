@@ -11,3 +11,10 @@ AGENTS.md
 agents/
 issue.md
 node_modules/
+
+# Windows build artifacts
+*.exe
+*.pdb
+
+# Empty/editor artifacts
+.codex

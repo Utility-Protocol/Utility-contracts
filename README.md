@@ -16,6 +16,7 @@ Soroban smart contracts for a decentralized utility metering and streaming proto
 - **Dust Sweeper** — Prunes fractional remainders from depleted streams
 - **Grant Stream** — Conservation goals trigger automatic grant matching
 - **Scheduled Backup Verification** — Restore-tested database backups with metrics, alerts, and canary rollout guidance
+- **Oracle Aggregation Framework** — Multi-provider oracle aggregation with a Chainlink `AggregatorV3Interface` adapter, median consensus, deviation/staleness validation, graceful fallback, and per-provider health monitoring (`contracts/oracle-aggregator`)
 
 ## Project Structure
 

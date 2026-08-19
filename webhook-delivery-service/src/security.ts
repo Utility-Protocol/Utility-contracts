@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
+import { logger } from './logger';
 
 export interface SignatureOutput {
   hmacSignature: string;
@@ -120,9 +121,9 @@ export function generateSignatures(
       const messageBytes = Buffer.from(signaturePayload, 'utf-8');
       const signatureBytes = nacl.sign.detached(messageBytes, secretKey);
       ed25519Signature = Buffer.from(signatureBytes).toString('base64');
-    } catch (err) {
+    } catch (err: any) {
       // Fallback or ignore invalid keys in signing
-      console.error('Ed25519 signing failed:', err);
+      logger.error('Ed25519 signing failed', { 'error.message': err?.message ?? String(err) });
     }
   }
 

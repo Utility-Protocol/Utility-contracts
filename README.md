@@ -12,6 +12,7 @@ Soroban smart contracts for a decentralized utility metering and streaming proto
 - **ZK-SNARK Privacy** — Groth16 proofs let meters prove usage without revealing raw readings
 - **Firmware Update Gate** — Time-limited, cryptographically signed update authorization
 - **Multi-Sig Governance** — 3-of-5 finance wallet quorum for large withdrawals
+- **Multi-Signature Treasury Wallet** — Standalone M-of-N wallet (`contracts/treasury-wallet`) for the protocol treasury with signer add/remove, transaction proposal & approval workflow, and time-locked execution for high-value transfers
 - **Emergency Response** — Circuit breakers, legal freezes, velocity limits, protocol pauses
 - **Dust Sweeper** — Prunes fractional remainders from depleted streams
 - **Grant Stream** — Conservation goals trigger automatic grant matching
@@ -28,7 +29,8 @@ Utility-contracts/
 │   │   ├── src/lib.rs              # Core implementation
 │   │   ├── src/test.rs             # Test suite
 │   │   └── Cargo.toml
-│   └── price_oracle/               # Price oracle contract
+│   ├── price_oracle/               # Price oracle contract
+│   └── treasury-wallet/            # Multi-signature treasury wallet (M-of-N, timelock)
 ├── webhook-delivery-service/       # High-performance off-chain Webhook service with retry & SSRF shielding (TS)
 ├── meter-simulator/                # Device simulator (JS)
 ├── usage-dashboard/                # Real-time Next.js analytics & Webhook monitor dashboard

@@ -55,8 +55,16 @@ fn main() {
     let message_bytes = serde_json::to_vec(&payload_data).unwrap();
     let signature = signing_key.sign(&message_bytes);
 
-    let sig_hex = signature.to_bytes().iter().map(|b| format!("{:02x}", b)).collect::<String>();
-    let pub_hex = verifying_key.to_bytes().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+    let sig_hex = signature
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
+    let pub_hex = verifying_key
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
 
     let final_payload = IotPayload {
         data: payload_data,

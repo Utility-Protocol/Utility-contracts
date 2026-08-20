@@ -10,6 +10,10 @@ use soroban_sdk::{
     symbol_short, token, Address, Bytes, BytesN, Env, String, Symbol, Vec,
 };
 
+pub mod batch_executor;
+#[cfg(test)]
+pub mod batch_executor_tests;
+
 #[contractclient(name = "PriceOracleClient")]
 pub trait PriceOracle {
     fn xlm_to_usd_cents(env: Env, xlm_amount: i128) -> i128;
@@ -3429,6 +3433,18 @@ pub struct UtilityContract;
 
 #[contractimpl]
 impl UtilityContract {
+    /// Executes a batch of operations atomically to save gas.
+    /// Fails the entire batch if any single operation fails.
+    /// Limited to 20 operations per batch.
+    pub fn execute_batch(env: Env, ops: Vec<crate::batch_executor::BatchOperation>) -> Vec<Val> {
+        crate::batch_executor::execute_batch(&env, ops)
+    }
+
+    /// Estimates the gas required for a batch of operations.
+    pub fn estimate_batch_gas(env: Env, ops: Vec<crate::batch_executor::BatchOperation>) -> u64 {
+        crate::batch_executor::estimate_batch_gas(&env, ops)
+    }
+
     /// Assigns a reseller to a specific meter with a defined fee percentage.
     ///
     /// # Arguments

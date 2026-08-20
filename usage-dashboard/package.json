@@ -11,8 +11,8 @@
   "dependencies": {
     "autoprefixer": "^10.0.1",
     "lucide-react": "^0.294.0",
-    "next": "^14.2.35",
-    "postcss": "^8",
+    "next": "^16.3.1",
+    "postcss": "^8.5.23",
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^2.8.0",

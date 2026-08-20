@@ -3,9 +3,7 @@
 //! Implements EIP-2771 compatible signature verification for meta-transactions.
 //! Provides cryptographic validation of relay requests using Ed25519 signatures.
 
-use soroban_sdk::{
-    xdr::ToXdr, Address, BytesN, Env, Symbol, Vec,
-};
+use soroban_sdk::{Address, BytesN, Env, Vec};
 
 /// Maximum age of a signature in seconds (6 hours)
 pub const MAX_SIGNATURE_AGE: u64 = 21_600;

@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { enqueueWebhook, getDeliveryLogs, getQueueSize } from './delivery';
 import { getPrometheusMetrics, getStatsSummary } from './metrics';
+import { logger } from './logger';
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -106,7 +107,7 @@ app.get('/health', (req: Request, res: Response) => {
 // Start the server
 if (process.env.NODE_ENV !== 'test') {
   app.listen(port, () => {
-    console.log(`🚀 Webhook Delivery Service listening on port ${port}`);
+    logger.info('webhook delivery service started', { 'server.port': Number(port) });
   });
 }
 

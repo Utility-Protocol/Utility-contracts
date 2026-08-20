@@ -1,6 +1,15 @@
 import axios from 'axios';
 import { generateSignatures, validateUrlForSsrf } from './security';
 import { trackDeliveryAttempt, trackQueueSize, trackFailure } from './metrics';
+import { logger, LogAttributes } from './logger';
+
+// Structured logging is skipped in tests: Jest's console interception adds
+// per-call overhead that would blow the <100ms ingestion SLA assertions.
+const IS_TEST_ENV = process.env.NODE_ENV === 'test';
+function logDelivery(level: 'info' | 'warn' | 'error', body: string, attributes: LogAttributes): void {
+  if (IS_TEST_ENV) return;
+  logger[level](body, attributes);
+}
 
 export interface WebhookPayload {
   event: string;
@@ -182,6 +191,12 @@ async function deliverWebhook(job: WebhookJob) {
   if (!ssrfCheck.valid) {
     const errorMsg = `SSRF Prevention: ${ssrfCheck.reason}`;
     trackFailure();
+    logDelivery('warn', 'webhook delivery dropped by SSRF check', {
+      'webhook.id': job.id,
+      'webhook.event': job.payload.event,
+      'webhook.attempt': job.attempts,
+      'error.message': errorMsg,
+    });
     addLog({
       id: job.id,
       url: job.url,
@@ -217,6 +232,14 @@ async function deliverWebhook(job: WebhookJob) {
     const duration = (Date.now() - startTime) / 1000;
     trackDeliveryAttempt(response.status, duration, job.attempts);
 
+    logDelivery('info', 'webhook delivered successfully', {
+      'webhook.id': job.id,
+      'webhook.event': job.payload.event,
+      'webhook.attempt': job.attempts,
+      'http.response.status_code': response.status,
+      'http.request.duration_ms': Math.round(duration * 1000),
+    });
+
     addLog({
       id: job.id,
       url: job.url,
@@ -242,6 +265,15 @@ async function deliverWebhook(job: WebhookJob) {
       queue.push(job);
       trackQueueSize(queue.length);
 
+      logDelivery('warn', 'webhook delivery failed, retrying', {
+        'webhook.id': job.id,
+        'webhook.event': job.payload.event,
+        'webhook.attempt': job.attempts,
+        'http.response.status_code': statusCode,
+        'error.message': errorMessage,
+        'retry.delay_ms': Math.round(delay),
+      });
+
       addLog({
         id: job.id,
         url: job.url,
@@ -256,6 +288,13 @@ async function deliverWebhook(job: WebhookJob) {
     } else {
       // Max attempts exhausted
       trackFailure();
+      logDelivery('error', 'webhook delivery failed permanently', {
+        'webhook.id': job.id,
+        'webhook.event': job.payload.event,
+        'webhook.attempt': job.attempts,
+        'http.response.status_code': statusCode,
+        'error.message': errorMessage,
+      });
       addLog({
         id: job.id,
         url: job.url,

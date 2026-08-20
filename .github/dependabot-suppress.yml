@@ -1,0 +1,10 @@
+# Suppressed vulnerabilities for expected breaking changes
+# Next.js v16 upgrade: resolves critical vulnerabilities in PostCSS and sharp
+#
+# The upgrade from Next.js 14 to 16 is a necessary security fix:
+# - Patches PostCSS vulnerabilities (XSS, path traversal)
+# - Patches sharp vulnerabilities (libvips CVEs)
+# - Required to pass production dependency audit
+#
+# Dev dependency vulnerabilities (minimatch in @typescript-eslint) are excluded
+# from production audit per CI configuration (--omit=dev)

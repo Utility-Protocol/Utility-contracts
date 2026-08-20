@@ -9741,6 +9741,7 @@ fn verify_usage_signature(
 // ============================================================================
 pub mod gasless_relay;
 pub mod gasless_relay_sig_verify;
+pub mod gasless_relay_policy;
 
 #[cfg(test)]
 mod gasless_relay_tests;

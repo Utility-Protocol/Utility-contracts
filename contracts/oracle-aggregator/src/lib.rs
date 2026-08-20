@@ -1,4 +1,8 @@
 #![no_std]
+
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
 //! # Oracle Aggregator
 //!
 //! A secure, multi-provider oracle integration framework for external data

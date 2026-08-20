@@ -9,6 +9,7 @@ crate-type = ["lib", "cdylib"]
 doctest = false
 
 [dependencies]
+wee_alloc = "0.4.5"
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]

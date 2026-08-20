@@ -9746,6 +9746,9 @@ pub mod gasless_relay_policy;
 #[cfg(test)]
 mod gasless_relay_tests;
 
+#[cfg(test)]
+mod gasless_relay_integration_tests;
+
 // Temporarily disabled while the legacy unit test module is repaired.
 // The new integration tests under `tests/` remain available.
 // mod test;

@@ -1,6 +1,9 @@
 #![no_std]
 extern crate alloc;
 
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
@@ -9735,6 +9738,19 @@ fn verify_usage_signature(
     );
     Ok(())
 }
+
+// ============================================================================
+// Issue #131: Gasless Transaction Relay for User Onboarding
+// ============================================================================
+pub mod gasless_relay;
+pub mod gasless_relay_sig_verify;
+pub mod gasless_relay_policy;
+
+#[cfg(test)]
+mod gasless_relay_tests;
+
+#[cfg(test)]
+mod gasless_relay_integration_tests;
 
 // Temporarily disabled while the legacy unit test module is repaired.
 // The new integration tests under `tests/` remain available.

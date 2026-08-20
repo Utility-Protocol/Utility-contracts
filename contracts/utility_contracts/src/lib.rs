@@ -9736,6 +9736,14 @@ fn verify_usage_signature(
     Ok(())
 }
 
+// ============================================================================
+// Issue #131: Gasless Transaction Relay for User Onboarding
+// ============================================================================
+pub mod gasless_relay;
+
+#[cfg(test)]
+mod gasless_relay_tests;
+
 // Temporarily disabled while the legacy unit test module is repaired.
 // The new integration tests under `tests/` remain available.
 // mod test;

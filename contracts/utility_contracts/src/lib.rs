@@ -9740,6 +9740,7 @@ fn verify_usage_signature(
 // Issue #131: Gasless Transaction Relay for User Onboarding
 // ============================================================================
 pub mod gasless_relay;
+pub mod gasless_relay_sig_verify;
 
 #[cfg(test)]
 mod gasless_relay_tests;

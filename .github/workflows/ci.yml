@@ -85,12 +85,12 @@ jobs:
         with:
           shared-key: utility-protocol-ci
       - name: Build WASM artifacts
-        run: cargo build --workspace --target wasm32-unknown-unknown --release
+        run: cargo build --manifest-path contracts/Cargo.toml --workspace --target wasm32-unknown-unknown --release
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v4
         with:
           name: wasm-artifacts
-          path: target/wasm32-unknown-unknown/release/*.wasm
+          path: contracts/target/wasm32-unknown-unknown/release/*.wasm
           if-no-files-found: error
 
   fuzz-detection:

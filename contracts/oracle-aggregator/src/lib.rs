@@ -28,6 +28,9 @@
 //!   value (or a conservative constant on cold start) and flags it via
 //!   `used_fallback`, so consumers can react rather than trust a silent value.
 
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
 pub mod adapter;
 mod aggregation;
 pub mod chainlink;

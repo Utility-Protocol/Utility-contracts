@@ -10,7 +10,7 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
-utility-contracts-common = { path = "../common" }
+utility-contracts-common = { path = "../common", features = ["wasm"] }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

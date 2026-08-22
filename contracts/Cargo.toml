@@ -4,3 +4,9 @@ members = ["utility_contracts", "price_oracle", "resource-token", "common", "set
 
 [workspace.dependencies]
 soroban-sdk = "23.2.4"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

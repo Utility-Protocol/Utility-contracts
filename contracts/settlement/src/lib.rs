@@ -1,7 +1,6 @@
 #![no_std]
 
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
 
 mod constants;
 mod conversion;

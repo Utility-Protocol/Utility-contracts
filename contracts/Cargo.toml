@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["utility_contracts", "price_oracle", "resource-token", "common", "settlement", "meter-aggregator", "fees", "oracle-aggregator", "treasury-wallet"]
+members = ["utility_contracts", "price_oracle", "resource-token", "common", "settlement", "meter-aggregator", "fees", "oracle-aggregator"]
 
 [workspace.dependencies]
-soroban-sdk = { version = "23.2.4", features = ["alloc"] }
+soroban-sdk = "23.2.4"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

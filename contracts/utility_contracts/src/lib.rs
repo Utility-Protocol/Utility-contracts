@@ -1,14 +1,17 @@
 #![no_std]
 extern crate alloc;
 
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
 
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
     symbol_short, token, Address, Bytes, BytesN, Env, String, Symbol, Vec,
 };
+
+pub mod batch_executor;
+#[cfg(test)]
+pub mod batch_executor_tests;
 
 #[contractclient(name = "PriceOracleClient")]
 pub trait PriceOracle {
@@ -827,6 +830,15 @@ pub struct UpgradeProposal {
 
 #[contracttype]
 #[derive(Clone)]
+pub struct EmergencyProposal {
+    pub new_wasm_hash: BytesN<32>,
+    pub new_storage_version: u32,
+    pub proposed_at: u64,
+    pub proposer: Address,
+}
+
+#[contracttype]
+#[derive(Clone)]
 pub struct AdminTransferProposal {
     pub current_admin: Address,
     pub proposed_admin: Address,
@@ -1041,6 +1053,10 @@ pub enum DataKey {
     BillingGroup(Address),
     BufferVault(u64),
     ComplianceOfficer,
+    EmergencyApprovals(BytesN<32>),
+    EmergencyProposal,
+    Guardians,
+    GuardianThreshold,
     ConservationGoal(u64),
     ContinuousFlow(u64),
     Contributor(u64, Address),
@@ -1271,6 +1287,7 @@ pub enum ContractError {
     InvalidPairingSignature = 14,
     MeterNotPaired = 15,
     UnauthorizedAdmin = 16,
+    Unauthorized = 200,
     InsufficientGasBounty = 17,
     NoDustToSweep = 18,
     InsufficientBuffer = 19,
@@ -1464,7 +1481,7 @@ const DEFAULT_TAX_RATE_BPS: i128 = 50;
 const MAINTENANCE_FUND_PERCENT_BPS: i128 = 100;
 const AUTO_EXTEND_LEDGER_THRESHOLD: u32 = 100;
 const LEDGER_LIFETIME_EXTENSION: u32 = 10_000;
-const UPGRADE_VETO_PERIOD_SECONDS: u64 = 7 * DAY_IN_SECONDS;
+const UPGRADE_VETO_PERIOD_SECONDS: u64 = 48 * 3600;
 const VETO_THRESHOLD_BPS: i128 = 500;
 
 
@@ -3429,6 +3446,18 @@ pub struct UtilityContract;
 
 #[contractimpl]
 impl UtilityContract {
+    /// Executes a batch of operations atomically to save gas.
+    /// Fails the entire batch if any single operation fails.
+    /// Limited to 20 operations per batch.
+    pub fn execute_batch(env: Env, ops: Vec<crate::batch_executor::BatchOperation>) -> Vec<Val> {
+        crate::batch_executor::execute_batch(&env, ops)
+    }
+
+    /// Estimates the gas required for a batch of operations.
+    pub fn estimate_batch_gas(env: Env, ops: Vec<crate::batch_executor::BatchOperation>) -> u64 {
+        crate::batch_executor::estimate_batch_gas(&env, ops)
+    }
+
     /// Assigns a reseller to a specific meter with a defined fee percentage.
     ///
     /// # Arguments
@@ -7059,6 +7088,93 @@ impl UtilityContract {
             .instance()
             .remove(&DataKey::UpgradeProposalTime);
         env.storage().instance().remove(&DataKey::VetoDeadline);
+    }
+
+    // ============================================================
+    // Emergency Upgrade Public Functions
+    // ============================================================
+
+    pub fn init_guardians(env: Env, admin: Address, guardians: Vec<Address>, threshold: u32) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&DataKey::AdminAddress).unwrap();
+        if admin != stored_admin {
+            panic_with_error!(&env, ContractError::Unauthorized);
+        }
+        
+        env.storage().instance().set(&DataKey::Guardians, &guardians);
+        env.storage().instance().set(&DataKey::GuardianThreshold, &threshold);
+    }
+
+    pub fn propose_emergency_upgrade(
+        env: Env, 
+        caller: Address, 
+        new_wasm_hash: BytesN<32>, 
+        new_storage_version: u32
+    ) {
+        caller.require_auth();
+        
+        let guardians: Vec<Address> = env.storage().instance().get(&DataKey::Guardians).unwrap_or(Vec::new(&env));
+        if !guardians.contains(&caller) {
+            panic_with_error!(&env, ContractError::Unauthorized);
+        }
+
+        let proposal = EmergencyProposal {
+            new_wasm_hash: new_wasm_hash.clone(),
+            new_storage_version,
+            proposed_at: env.ledger().timestamp(),
+            proposer: caller.clone(),
+        };
+
+        env.storage().instance().set(&DataKey::EmergencyProposal, &proposal);
+        
+        // Auto-approve for the proposer
+        let mut approvals = Vec::new(&env);
+        approvals.push_back(caller.clone());
+        env.storage().instance().set(&DataKey::EmergencyApprovals(new_wasm_hash.clone()), &approvals);
+        
+        env.events().publish(
+            (soroban_sdk::symbol_short!("EmrgProp"),),
+            new_wasm_hash,
+        );
+    }
+
+    pub fn approve_emergency_upgrade(env: Env, caller: Address, wasm_hash: BytesN<32>) {
+        caller.require_auth();
+
+        let guardians: Vec<Address> = env.storage().instance().get(&DataKey::Guardians).unwrap_or(Vec::new(&env));
+        if !guardians.contains(&caller) {
+            panic_with_error!(&env, ContractError::Unauthorized);
+        }
+
+        let proposal: EmergencyProposal = env.storage().instance().get(&DataKey::EmergencyProposal).unwrap();
+        if proposal.new_wasm_hash != wasm_hash {
+            panic_with_error!(&env, ContractError::InvalidWasmHash); 
+        }
+
+        let mut approvals: Vec<Address> = env.storage().instance().get(&DataKey::EmergencyApprovals(wasm_hash.clone())).unwrap_or(Vec::new(&env));
+        
+        if !approvals.contains(&caller) {
+            approvals.push_back(caller.clone());
+            env.storage().instance().set(&DataKey::EmergencyApprovals(wasm_hash.clone()), &approvals);
+        }
+
+        let threshold: u32 = env.storage().instance().get(&DataKey::GuardianThreshold).unwrap_or(0);
+        
+        if approvals.len() >= threshold {
+            if let Err(e) = validate_storage_version_compatibility(&env, proposal.new_storage_version) {
+                panic_with_error!(&env, e);
+            }
+
+            env.deployer().update_current_contract_wasm(wasm_hash.clone());
+
+            env.events().publish(
+                (soroban_sdk::symbol_short!("EmrgFin"),),
+                wasm_hash.clone(),
+            );
+
+            env.storage().instance().remove(&DataKey::EmergencyProposal);
+            env.storage().instance().remove(&DataKey::EmergencyApprovals(wasm_hash));
+        }
     }
 
     /// Run migration for storage version upgrade

@@ -11,7 +11,7 @@
   "dependencies": {
     "autoprefixer": "^10.0.1",
     "lucide-react": "^0.294.0",
-    "next": "^16.3.1",
+    "next": "^15.5.23",
     "postcss": "^8.5.23",
     "react": "^18",
     "react-dom": "^18",
@@ -22,10 +22,12 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "@typescript-eslint/eslint-plugin": "^8.67.0",
-    "@typescript-eslint/parser": "^8.67.0",
-    "eslint": "^10.8.1",
-    "eslint-config-next": "^16.3.1",
+    "eslint": "^8",
+    "eslint-config-next": "^15.5.23",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "^8.5.23",
+    "sharp": "^0.35.0"
   }
 }

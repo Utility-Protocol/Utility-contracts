@@ -18,6 +18,7 @@ Soroban smart contracts for a decentralized utility metering and streaming proto
 - **Grant Stream** — Conservation goals trigger automatic grant matching
 - **Scheduled Backup Verification** — Restore-tested database backups with metrics, alerts, and canary rollout guidance
 - **Oracle Aggregation Framework** — Multi-provider oracle aggregation with a Chainlink `AggregatorV3Interface` adapter, median consensus, deviation/staleness validation, graceful fallback, and per-provider health monitoring (`contracts/oracle-aggregator`)
+- **Multi-Region Replication and Disaster Recovery** — Active-passive cross-region replication (us-east-1 → eu-west-1 → ap-southeast-1) with RPO ≤ 60s, RTO ≤ 5 min, automated health monitoring, blue-green canary promotion, and scheduled DR validation tests (`docs/MULTI_REGION_DR_ARCHITECTURE.md`)
 
 ## Project Structure
 
@@ -101,6 +102,34 @@ Verified via 15 property tests with 100+ randomized cases each, covering pause/r
 ### Chaos Engineering in Staging
 
 Staging resilience exercises are governed by the [Chaos Engineering Testing Blueprint](docs/runbooks/chaos-engineering-staging.md). The blueprint defines approved fault scenarios, security guardrails, P99 and availability SLOs, monitoring requirements, and blue-green/canary rollout steps for chaos-enabled staging deployments.
+
+### Multi-Region Replication and Disaster Recovery
+
+The Utility Protocol stack operates across three regions in active-passive configuration to meet its 99.99% availability and < 100 ms P99 targets:
+
+| Region | Role | Replication |
+|---|---|---|
+| `us-east-1` | Primary (active) | — |
+| `eu-west-1` | Secondary (hot standby) | Synchronous PostgreSQL streaming, Kafka MirrorMaker 2 |
+| `ap-southeast-1` | Tertiary (warm standby) | Async PostgreSQL streaming, Kafka MirrorMaker 2 |
+
+**Recovery targets:**
+- **RPO:** ≤ 60 seconds (maximum data loss on failover)
+- **RTO:** ≤ 5 minutes (time to restore service after region failure)
+
+**Key components:**
+- `meter-simulator/src/multi-region-replication.js` — Replication state tracking, health monitoring, failover orchestration
+- `meter-simulator/src/dr-health-checker.js` — Cross-region health probes and failover readiness reports
+- `meter-simulator/src/dr-canary-analyzer.js` — Canary promotion decisions (PROMOTE / HOLD / ROLLBACK)
+- `scripts/dr-failover.sh` — Controlled DR failover with dry-run mode and Prometheus metrics
+- `scripts/dr-test.sh` — DR validation test runner (connectivity, replication-lag, rto-validation, rpo-validation)
+- `scripts/dr-canary-promote.sh` — Canary stage promotion (5% → 25% → 50% → 100%) with SLO gates
+- `deploy/service-mesh/dr-blue-green.yaml` — Istio VirtualService/DestinationRule for DR-aware blue-green routing
+- `monitoring/multi-region-dr-alerts.yml` — Prometheus alert rules for replication lag, RPO/RTO, and region health
+- `monitoring/multi-region-dr-dashboard.json` — Grafana dashboard for DR observability
+- `usage-dashboard/src/components/MultiRegionDRPanel.tsx` — React component for DR status in the operator dashboard
+
+See [Multi-Region DR Architecture](docs/MULTI_REGION_DR_ARCHITECTURE.md) and [DR Failover Runbook](docs/runbooks/DR_FAILOVER_RUNBOOK.md) for full details.
 
 ### Security Properties
 

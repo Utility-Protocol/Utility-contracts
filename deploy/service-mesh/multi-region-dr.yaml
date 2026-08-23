@@ -1,0 +1,238 @@
+---
+# PrometheusRule: Multi-Region DR Alerting Rules
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: utility-contracts-multi-region-dr
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: utility-contracts.multi-region-dr.slo
+      rules:
+        - alert: ReplicationLagHigh
+          expr: utility_replication_lag_seconds > 60
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Replication lag exceeds RPO target"
+            description: "Replication from {{ $labels.source_region }} to {{ $labels.target_region }} is {{ $value }}s, exceeding the 60s RPO."
+
+        - alert: RegionHealthCritical
+          expr: utility_region_health_status == 0
+          for: 2m
+          labels:
+            severity: page
+          annotations:
+            summary: "Region {{ $labels.region }} is unhealthy"
+            description: "Region {{ $labels.region }} (role={{ $labels.role }}) has been unhealthy for 2 minutes. Evaluate failover."
+
+        - alert: FailoverRPOViolation
+          expr: increase(utility_dr_rpo_violation_total[5m]) > 0
+          for: 0m
+          labels:
+            severity: page
+          annotations:
+            summary: "RPO violation detected"
+            description: "RPO violations detected in the last 5 minutes. Failover data loss may exceed the 60s target."
+
+        - alert: FailoverRTOViolation
+          expr: utility_dr_failover_duration_seconds > 300
+          for: 0m
+          labels:
+            severity: page
+          annotations:
+            summary: "DR failover exceeded RTO target"
+            description: "DR failover took {{ $value }}s, exceeding the 300s RTO target."
+
+        - alert: CrossRegionLatencyHigh
+          expr: |
+            histogram_quantile(0.99, sum(rate(
+              istio_request_duration_milliseconds_bucket{
+                destination_workload_namespace="utility-contracts"
+              }[5m]
+            )) by (le, source_cluster, destination_cluster)) > 100
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cross-region P99 latency exceeds 100ms"
+            description: "P99 cross-region latency from {{ $labels.source_cluster }} to {{ $labels.destination_cluster }} is {{ $value }}ms."
+
+        - alert: ReplicationBytesZero
+          expr: rate(utility_replication_bytes_total[10m]) == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Replication bytes dropped to zero for {{ $labels.region }}"
+            description: "No replication bytes observed for {{ $labels.region }} in 10 minutes. Replication may be stalled."
+
+        - alert: DRTestStale
+          expr: time() - utility_dr_test_last_timestamp_seconds > 86400
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "DR test is stale for {{ $labels.region }}"
+            description: "DR test for {{ $labels.region }} has not run in 24 hours. Run scripts/dr-test.sh to validate readiness."
+
+        - alert: MultiRegionAvailabilityLow
+          expr: |
+            100 * sum(rate(
+              istio_requests_total{
+                destination_workload_namespace="utility-contracts",
+                response_code!~"5.."
+              }[30m]
+            ))
+            /
+            sum(rate(
+              istio_requests_total{
+                destination_workload_namespace="utility-contracts"
+              }[30m]
+            )) < 99.99
+          for: 10m
+          labels:
+            severity: page
+          annotations:
+            summary: "Multi-region availability below 99.99%"
+            description: "30-minute rolling availability is {{ $value }}%, below the 99.99% SLO. Check region health immediately."
+
+        - alert: DRConsecutiveCriticalEvaluations
+          expr: utility_dr_consecutive_critical_evaluations >= 3
+          for: 0m
+          labels:
+            severity: page
+          annotations:
+            summary: "DR health is critical for 3+ consecutive evaluations"
+            description: "DR health checker has reported CRITICAL status {{ $value }} times consecutively. Automatic failover criteria may be met."
+
+---
+# VirtualService: Cross-Region Failover Routing
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: utility-contracts-dr-failover
+  namespace: utility-contracts
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+spec:
+  hosts:
+    - api.utility-contracts.example.com
+    - utility-api.utility-contracts.svc.cluster.local
+  gateways:
+    - utility-contracts-gateway
+    - mesh
+  http:
+    # DR canary route (header-based testing).
+    - name: dr-canary
+      match:
+        - headers:
+            x-dr-canary:
+              exact: "true"
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: dr-secondary
+          weight: 100
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+
+    # Force route to secondary region (for testing and DR drills).
+    - name: dr-force-secondary
+      match:
+        - headers:
+            x-dr-failover:
+              exact: "eu"
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: dr-secondary
+          weight: 100
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+
+    # Force route to tertiary region.
+    - name: dr-force-tertiary
+      match:
+        - headers:
+            x-dr-failover:
+              exact: "ap"
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: dr-tertiary
+          weight: 100
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+
+    # Primary route: all traffic to dr-primary by default.
+    - name: dr-primary
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: dr-primary
+          weight: 100
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+
+---
+# DestinationRule: Regional Subsets
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: utility-api-dr-subsets
+  namespace: utility-contracts
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+spec:
+  host: utility-api.utility-contracts.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        connectTimeout: 50ms
+      http:
+        http1MaxPendingRequests: 1024
+        http2MaxRequests: 1024
+  subsets:
+    # Primary region: us-east-1 (normal active).
+    - name: dr-primary
+      labels:
+        dr-region: us-east-1
+      trafficPolicy:
+        tls:
+          mode: ISTIO_MUTUAL
+
+    # Secondary region: eu-west-1 (hot standby).
+    - name: dr-secondary
+      labels:
+        dr-region: eu-west-1
+      trafficPolicy:
+        tls:
+          mode: ISTIO_MUTUAL
+
+    # Tertiary region: ap-southeast-1 (warm standby).
+    - name: dr-tertiary
+      labels:
+        dr-region: ap-southeast-1
+      trafficPolicy:
+        tls:
+          mode: ISTIO_MUTUAL

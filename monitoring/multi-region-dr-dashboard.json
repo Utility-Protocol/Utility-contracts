@@ -1,0 +1,337 @@
+{
+  "title": "Multi-Region DR — Utility Protocol",
+  "description": "Replication health, failover events, RPO/RTO compliance, and cross-region latency for the Utility Protocol multi-region DR stack.",
+  "uid": "utility-multi-region-dr",
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "tags": ["utility-protocol", "disaster-recovery", "multi-region"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Region Health Status",
+      "type": "stat",
+      "description": "Current health of each region (1 = HEALTHY, 0 = unhealthy).",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 4 },
+      "targets": [
+        {
+          "expr": "utility_region_health_status",
+          "legendFormat": "{{ region }} ({{ role }})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "value": "1", "text": "HEALTHY" },
+            { "type": "value", "value": "0", "text": "UNHEALTHY" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "short",
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" }
+    },
+    {
+      "id": 2,
+      "title": "DR Overall Health",
+      "type": "stat",
+      "description": "Overall DR health from the health checker (1 = HEALTHY, 0 = degraded/critical).",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "expr": "utility_dr_overall_health",
+          "legendFormat": "DR Health"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "value": "1", "text": "HEALTHY" },
+            { "type": "value", "value": "0", "text": "DEGRADED/CRITICAL" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 3,
+      "title": "RPO Compliance",
+      "type": "stat",
+      "description": "Total RPO violations detected (target: 0).",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "utility_dr_rpo_violation_total",
+          "legendFormat": "RPO Violations"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" },
+          "unit": "short"
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 4,
+      "title": "DR Canary Stage",
+      "type": "stat",
+      "description": "Current DR canary promotion stage (0-100%).",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "utility_dr_canary_stage",
+          "legendFormat": "Canary Stage"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": 0 },
+              { "color": "green", "value": 100 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
+    },
+    {
+      "id": 5,
+      "title": "Replication Lag by Region",
+      "type": "timeseries",
+      "description": "Current replication lag in seconds for each source→target region pair. Alert fires when lag > 60s.",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "utility_replication_lag_seconds",
+          "legendFormat": "{{ source_region }} → {{ target_region }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 60 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Cross-Region Latency P99",
+      "type": "timeseries",
+      "description": "P99 request latency across regions (target: < 100ms).",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket{destination_workload_namespace=\"utility-contracts\"}[5m])) by (le, source_cluster, destination_cluster))",
+          "legendFormat": "P99 {{ source_cluster }} → {{ destination_cluster }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Failover Events",
+      "type": "timeseries",
+      "description": "Cumulative failover events by route (from → to region).",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "increase(utility_failover_total[1h])",
+          "legendFormat": "{{ from_region }} → {{ to_region }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Replication Throughput",
+      "type": "timeseries",
+      "description": "Rate of replication bytes per region.",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "rate(utility_replication_bytes_total[5m])",
+          "legendFormat": "{{ region }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "Bps" }
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Last Successful DR Test",
+      "type": "stat",
+      "description": "Time since last successful DR test per region and scenario (target: < 24h).",
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 4 },
+      "targets": [
+        {
+          "expr": "time() - utility_dr_test_last_timestamp_seconds{scenario!=\"\"}",
+          "legendFormat": "{{ region }} / {{ scenario }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 43200 },
+              { "color": "red", "value": 86400 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 10,
+      "title": "DR Test Results",
+      "type": "table",
+      "description": "Last DR test pass/fail by region and scenario.",
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 4 },
+      "targets": [
+        {
+          "expr": "utility_dr_test_success",
+          "legendFormat": "{{ region }} — {{ scenario }}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "value": "1", "text": "✓ PASSED" },
+            { "type": "value", "value": "0", "text": "✗ FAILED" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "sortBy": [{ "displayName": "Value", "desc": false }] }
+    },
+    {
+      "id": 11,
+      "title": "Consecutive Critical Evaluations",
+      "type": "stat",
+      "description": "Number of consecutive CRITICAL health evaluations. Automatic failover triggers at 3.",
+      "gridPos": { "x": 0, "y": 22, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "utility_dr_consecutive_critical_evaluations",
+          "legendFormat": "Consecutive Critical"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          },
+          "color": { "mode": "thresholds" },
+          "unit": "short"
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 12,
+      "title": "Canary Decision History",
+      "type": "timeseries",
+      "description": "Canary analysis decision rate (PROMOTE, HOLD, ROLLBACK) over time.",
+      "gridPos": { "x": 6, "y": 22, "w": 18, "h": 4 },
+      "targets": [
+        {
+          "expr": "rate(utility_dr_canary_decision_total[5m])",
+          "legendFormat": "{{ decision }}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "promote" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "rollback" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "hold" }, "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      }
+    }
+  ]
+}

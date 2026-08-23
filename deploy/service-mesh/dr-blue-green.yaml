@@ -1,0 +1,177 @@
+---
+# VirtualService: DR-Aware Blue-Green Deployment
+#
+# Combines the standard blue/green deployment slot routing with DR-region
+# failover routing. Traffic flows:
+#   - x-dr-canary: "true"        → green DR slice (canary testing)
+#   - x-dr-failover: "eu"        → eu-west-1 (force secondary, for DR drills)
+#   - x-dr-failover: "ap"        → ap-southeast-1 (force tertiary)
+#   - default                    → blue (production) at configurable weights
+#
+# During normal operation:  blue=100%, green=0%
+# During canary-5:          blue=95%,  green=5%
+# During canary-25:         blue=75%,  green=25%
+# During canary-50:         blue=50%,  green=50%
+# During production:        blue=0%,   green=100%
+# During DR failover:       primary route updated to dr-secondary or dr-tertiary
+#
+# Weights are managed by scripts/dr-canary-promote.sh via kubectl patch.
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: utility-contracts-dr-blue-green
+  namespace: utility-contracts
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+    app.kubernetes.io/component: dr-traffic-management
+spec:
+  hosts:
+    - api.utility-contracts.example.com
+    - utility-api.utility-contracts.svc.cluster.local
+  gateways:
+    - utility-contracts-gateway
+    - mesh
+  http:
+    # DR canary: header routes to the green DR slice for canary testing.
+    - name: dr-canary
+      match:
+        - headers:
+            x-dr-canary:
+              exact: "true"
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: green
+          weight: 100
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+
+    # DR force-secondary: header routes directly to eu-west-1 for DR drills.
+    - name: dr-force-eu
+      match:
+        - headers:
+            x-dr-failover:
+              exact: "eu"
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: dr-secondary
+          weight: 100
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+
+    # DR force-tertiary: header routes directly to ap-southeast-1.
+    - name: dr-force-ap
+      match:
+        - headers:
+            x-dr-failover:
+              exact: "ap"
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: dr-tertiary
+          weight: 100
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+
+    # Primary route: blue/green weights. Update weights via dr-canary-promote.sh.
+    - name: primary
+      route:
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: blue
+          weight: 100
+        - destination:
+            host: utility-api.utility-contracts.svc.cluster.local
+            subset: green
+          weight: 0
+      timeout: 100ms
+      retries:
+        attempts: 2
+        perTryTimeout: 40ms
+        retryOn: connect-failure,refused-stream,unavailable,cancelled,5xx
+
+---
+# DestinationRule: Blue/Green/DR Regional Subsets
+#
+# Defines five subsets:
+#   blue          — current production deployment slot (label: deployment-slot=blue)
+#   green         — canary/new deployment slot (label: deployment-slot=green)
+#   dr-primary    — us-east-1 (normal active region)
+#   dr-secondary  — eu-west-1 (hot standby)
+#   dr-tertiary   — ap-southeast-1 (warm standby)
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: utility-api-dr-blue-green-subsets
+  namespace: utility-contracts
+  labels:
+    app.kubernetes.io/part-of: utility-contracts
+    app.kubernetes.io/component: dr-traffic-management
+spec:
+  host: utility-api.utility-contracts.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        connectTimeout: 50ms
+        maxConnections: 1024
+      http:
+        http1MaxPendingRequests: 1024
+        http2MaxRequests: 1024
+        maxRetries: 3
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  subsets:
+    # Blue deployment slot (current production).
+    - name: blue
+      labels:
+        deployment-slot: blue
+      trafficPolicy:
+        tls:
+          mode: ISTIO_MUTUAL
+
+    # Green deployment slot (canary / next version).
+    - name: green
+      labels:
+        deployment-slot: green
+      trafficPolicy:
+        tls:
+          mode: ISTIO_MUTUAL
+
+    # Primary region (us-east-1 active).
+    - name: dr-primary
+      labels:
+        dr-region: us-east-1
+      trafficPolicy:
+        tls:
+          mode: ISTIO_MUTUAL
+
+    # Secondary region (eu-west-1 hot standby).
+    - name: dr-secondary
+      labels:
+        dr-region: eu-west-1
+      trafficPolicy:
+        tls:
+          mode: ISTIO_MUTUAL
+
+    # Tertiary region (ap-southeast-1 warm standby).
+    - name: dr-tertiary
+      labels:
+        dr-region: ap-southeast-1
+      trafficPolicy:
+        tls:
+          mode: ISTIO_MUTUAL

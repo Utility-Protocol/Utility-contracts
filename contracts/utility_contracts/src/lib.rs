@@ -345,6 +345,9 @@ pub struct SignedUsageData {
 mod gas_estimator;
 use gas_estimator::GasCostEstimator;
 
+pub mod config_manager;
+#[cfg(test)]
+mod config_manager_tests;
 pub mod enterprise;
 pub mod ghost_sweeper;
 pub mod grant_stream_listener;
@@ -1412,6 +1415,17 @@ pub enum ContractError {
     InvalidEncryptedPayload = 122,
     EncryptedPayloadTooLarge = 123,
     CommitmentMismatch = 124,
+
+    // Configuration Management errors (Issue #122)
+    ConfigFieldNotInSchema = 125,
+    ConfigTypeMismatch = 126,
+    ConfigValueOutOfRange = 127,
+    ConfigChangeAlreadyPending = 128,
+    ConfigChangeNotPending = 129,
+    ConfigStagingWindowNotElapsed = 130,
+    ConfigVetoThresholdReached = 131,
+    ConfigTooManyFields = 132,
+    ConfigNoPreviousValue = 133,
 }
 
 
@@ -7431,6 +7445,139 @@ impl UtilityContract {
 
         env.events()
             .publish((soroban_sdk::symbol_short!("ActvUser"),), user);
+    }
+
+    // ==================== ISSUE #122: CONFIG MANAGEMENT ====================
+    //
+    // System-wide configuration management with schema validation and a
+    // staged (48h default) rollout with community veto — see
+    // `config_manager` module docs for the full design. Each entry point
+    // here does the auth/admin-matching work (this module owns
+    // `DataKey::AdminAddress` / `DataKey::ActiveUsers`) and then delegates
+    // to the decoupled, independently-testable `config_manager` module.
+
+    /// Register or update the schema for a config field (admin only).
+    pub fn register_config_schema(
+        env: Env,
+        admin: Address,
+        field: Symbol,
+        value_type: config_manager::ConfigValueType,
+        required: bool,
+        min_value: Option<i128>,
+        max_value: Option<i128>,
+        default_value: Option<config_manager::ConfigValue>,
+        description: Symbol,
+    ) {
+        let stored_admin = get_admin_or_panic(&env);
+        if admin != stored_admin {
+            panic_with_error!(&env, ContractError::UnauthorizedAdmin);
+        }
+        admin.require_auth();
+
+        config_manager::register_schema_field(
+            &env,
+            admin,
+            field,
+            value_type,
+            required,
+            min_value,
+            max_value,
+            default_value,
+            description,
+        );
+    }
+
+    /// Read a field's schema, if registered.
+    pub fn get_config_schema(env: Env, field: Symbol) -> Option<config_manager::ConfigFieldSchema> {
+        config_manager::get_schema(&env, &field)
+    }
+
+    /// Read a field's current live value (falls back to schema default).
+    pub fn get_config_value(env: Env, field: Symbol) -> Option<config_manager::ConfigValue> {
+        config_manager::get_config_value(&env, &field)
+    }
+
+    /// Current global config version — bumped on every applied/overridden/
+    /// rolled-back change. Off-chain services poll or watch events for this
+    /// to know when to hot-reload their local config.
+    pub fn get_config_version(env: Env) -> u64 {
+        config_manager::get_config_version(&env)
+    }
+
+    /// Propose a batch of schema-validated config changes (admin only). They
+    /// take effect automatically after `staging_window_override` seconds
+    /// (default 48h) unless vetoed by enough active users. Returns the
+    /// change id (its proposal timestamp).
+    pub fn propose_config_change(
+        env: Env,
+        admin: Address,
+        fields: Vec<Symbol>,
+        values: Vec<config_manager::ConfigValue>,
+        staging_window_override: Option<u64>,
+    ) -> u64 {
+        let stored_admin = get_admin_or_panic(&env);
+        if admin != stored_admin {
+            panic_with_error!(&env, ContractError::UnauthorizedAdmin);
+        }
+        admin.require_auth();
+
+        config_manager::propose_config_change(&env, admin, fields, values, staging_window_override)
+    }
+
+    /// Veto the currently pending config change. Open to any registered
+    /// active user, one vote each, matching the admin-transfer veto pattern.
+    pub fn veto_config_change(env: Env, voter: Address, change_id: u64) -> u32 {
+        voter.require_auth();
+        config_manager::veto_config_change(&env, voter, change_id)
+    }
+
+    /// Cancel the pending config change before it takes effect (admin only).
+    pub fn cancel_pending_config_change(env: Env, admin: Address) {
+        let stored_admin = get_admin_or_panic(&env);
+        if admin != stored_admin {
+            panic_with_error!(&env, ContractError::UnauthorizedAdmin);
+        }
+        admin.require_auth();
+        config_manager::cancel_pending_config_change(&env, admin);
+    }
+
+    /// Apply the pending config change once its staging window has elapsed
+    /// and it wasn't vetoed. Callable by anyone (mirrors
+    /// `execute_admin_transfer`) since it is fully deterministic and safe.
+    pub fn apply_config_change(env: Env) -> u64 {
+        let total_active_users: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ActiveUsers)
+            .unwrap_or(0);
+        config_manager::apply_config_change(&env, total_active_users)
+    }
+
+    /// Bypass staging for a single field (admin only) — incident response.
+    /// Still fully schema-validated; emits a distinct event for off-chain
+    /// alerting since this path skips community review.
+    pub fn emergency_set_config_value(
+        env: Env,
+        admin: Address,
+        field: Symbol,
+        value: config_manager::ConfigValue,
+    ) {
+        let stored_admin = get_admin_or_panic(&env);
+        if admin != stored_admin {
+            panic_with_error!(&env, ContractError::UnauthorizedAdmin);
+        }
+        admin.require_auth();
+        config_manager::emergency_set_config_value(&env, admin, field, value);
+    }
+
+    /// Restore a field to its previous value, one step back (admin only).
+    pub fn rollback_config_field(env: Env, admin: Address, field: Symbol) {
+        let stored_admin = get_admin_or_panic(&env);
+        if admin != stored_admin {
+            panic_with_error!(&env, ContractError::UnauthorizedAdmin);
+        }
+        admin.require_auth();
+        config_manager::rollback_config_field(&env, admin, field);
     }
 
     // ==================== TASK #2: LEGAL FREEZE ====================

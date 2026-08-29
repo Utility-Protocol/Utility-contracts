@@ -19,6 +19,13 @@ const deliveryDuration = new Histogram({
   registers: [registry],
 });
 
+const ingestionDuration = new Histogram({
+  name: 'webhook_ingestion_duration_milliseconds',
+  help: 'Latency to enqueue a webhook and return HTTP 202 (critical ingestion path)',
+  buckets: [1, 2, 5, 10, 25, 50, 100, 250],
+  registers: [registry],
+});
+
 const queueSize = new Gauge({
   name: 'webhook_queue_size_current',
   help: 'Current size of the webhook delivery queue',
@@ -79,6 +86,18 @@ export function trackDeliveryAttempt(
   statCache.durations.push(durationSeconds);
   if (statCache.durations.length > 1000) {
     statCache.durations.shift();
+  }
+}
+
+/**
+ * Tracks ingestion (enqueue -> HTTP 202) latency in milliseconds.
+ * This is the critical path driving the <100ms P99 ingestion SLA.
+ */
+export function trackIngestionDuration(ms: number): void {
+  try {
+    ingestionDuration.observe(ms);
+  } catch {
+    // Ignored
   }
 }
 

@@ -226,5 +226,16 @@ describe('Webhook Delivery Service Suite', () => {
       expect(response.status).toBe(200);
       expect(response.text).toContain('webhook_delivery_attempts_total');
     });
+
+    test('ingestion latency histograms are exposed for regression monitoring', async () => {
+      await request(app).post('/webhooks').send({
+        payload: { event: 'low_balance', timestamp: Date.now(), data: { meter_id: 9 } },
+        url: 'https://webhook.receiver.com/hook',
+        secret: 'shh_secret',
+      });
+      const response = await request(app).get('/metrics');
+      expect(response.status).toBe(200);
+      expect(response.text).toContain('webhook_ingestion_duration_milliseconds_bucket');
+    });
   });
 });

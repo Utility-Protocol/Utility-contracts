@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { enqueueWebhook, getDeliveryLogs, getQueueSize } from './delivery';
-import { getPrometheusMetrics, getStatsSummary } from './metrics';
+import { getPrometheusMetrics, getStatsSummary, trackIngestionDuration } from './metrics';
 import { logger } from './logger';
 
 const app = express();
@@ -25,6 +25,7 @@ app.use((req, res, next) => {
  * Decoupled High-Performance Webhook Ingestion API (<100ms SLA, typically <10ms)
  */
 app.post('/webhooks', (req: Request, res: Response) => {
+  const started = process.hrtime.bigint();
   const { payload, url, secret, privateKey, maxAttempts } = req.body;
 
   // Input validation
@@ -50,6 +51,8 @@ app.post('/webhooks', (req: Request, res: Response) => {
   );
 
   // Return immediately with 202 Accepted
+  const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
+  trackIngestionDuration(durationMs);
   return res.status(202).json({
     status: 'ACCEPTED',
     message: 'Webhook enqueued for asynchronous delivery.',

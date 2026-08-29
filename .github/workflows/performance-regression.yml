@@ -1,0 +1,109 @@
+name: Performance Regression Detection
+
+# Automated performance regression detection for the webhook-delivery-service critical
+# ingestion path (<100ms P99 SLO). Runs the benchmark on every PR against the committed
+# baseline and fails the check when a metric regresses beyond tolerance or breaches the
+# absolute SLO.
+#
+# Baseline refresh: dispatch this workflow manually with the `update_baseline` input set to
+# `true` after a verified performance improvement. A PR that bumps the committed baseline is
+# opened automatically (the baseline is never written to main directly).
+
+on:
+  workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: 'Refresh the committed performance baseline to this run (opens a PR)'
+        required: false
+        default: 'false'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'webhook-delivery-service/**'
+      - '.perf/**'
+      - 'scripts/perf-regression-gate.sh'
+      - '.github/workflows/performance-regression.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'webhook-delivery-service/**'
+      - '.perf/**'
+      - 'scripts/perf-regression-gate.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark-gate:
+    name: Benchmark & regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webhook-delivery-service/package-lock.json
+
+      - name: Run performance regression gate
+        env:
+          PERF_SAMPLES: 800
+          PERF_WARMUP: 200
+          PERF_TOLERANCE: 30
+        run: ./scripts/perf-regression-gate.sh
+
+      - name: Upload benchmark results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: .perf/results/latest.json
+          if-no-files-found: ignore
+
+  baseline-refresh:
+    name: Refresh performance baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.update_baseline == 'true' }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webhook-delivery-service/package-lock.json
+
+      - name: Run gate and refresh baseline
+        env:
+          PERF_SAMPLES: 1000
+          PERF_WARMUP: 300
+        run: ./scripts/perf-regression-gate.sh --update-baseline
+
+      - name: Open baseline refresh PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: perf/baseline-refresh
+          title: 'perf: refresh performance baseline'
+          body: |
+            Automated baseline refresh from workflow_dispatch.
+
+            The webhook-ingestion benchmark passed against the previous baseline and the
+            committed baseline (`.perf/perf-baselines.json`) has been updated to reflect the
+            current measured performance. Review the delta before merging.
+          commit-message: 'perf: refresh committed performance baseline'
+          delete-branch: true
+          labels: performance

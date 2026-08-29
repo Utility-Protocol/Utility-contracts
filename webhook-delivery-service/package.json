@@ -8,7 +8,9 @@
     "start": "node dist/index.js",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "perf": "npm run build && node dist/perf/benchmark.js",
+    "perf:gate": "npm run build && node dist/perf/compare-results.js --current ../.perf/results/latest.json --baseline ../.perf/perf-baselines.json"
   },
   "dependencies": {
     "axios": "^1.6.2",

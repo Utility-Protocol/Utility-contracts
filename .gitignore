@@ -18,3 +18,10 @@ node_modules/
 
 # Empty/editor artifacts
 .codex
+
+# Performance benchmark run artifacts (baseline .perf/perf-baselines.json is committed)
+.perf/results/
+
+# TypeScript build/coverage artifacts (webhook-delivery-service)
+dist/
+coverage/

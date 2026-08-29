@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-28T23:57:00.000Z",
+  "note": "Baseline for the webhook-ingestion suite. Values are padded slightly above measured CI/local runs so scheduling noise does not cause spurious failures; the hard SLO (ingestion_p99_ms.slaMs = 100ms) is the primary gate. Refresh deliberately after verified improvements via scripts/perf-regression-gate.sh --update-baseline (or the workflow_dispatch 'Update baseline' input).",
+  "baselines": {
+    "ingestion_p50_ms": {
+      "value": 2,
+      "direction": "lower"
+    },
+    "ingestion_p95_ms": {
+      "value": 5,
+      "direction": "lower"
+    },
+    "ingestion_p99_ms": {
+      "value": 10,
+      "slaMs": 100,
+      "direction": "lower"
+    },
+    "ingestion_mean_ms": {
+      "value": 2,
+      "direction": "lower"
+    },
+    "ingestion_throughput_rps": {
+      "value": 500,
+      "direction": "higher"
+    }
+  }
+}

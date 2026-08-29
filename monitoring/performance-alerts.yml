@@ -1,0 +1,59 @@
+# Performance SLO alerting for the webhook delivery service.
+#
+# Mirrors the CI regression gate (see docs/runbooks/PERFORMANCE_REGRESSION.md): the CI gate
+# catches regressions introduced by code changes before merge; these rules catch runtime
+# degradation (noisy neighbours, resource exhaustion, network path changes) after deploy.
+#
+# Metrics are exported by the webhook-delivery-service /metrics endpoint (prom-client).
+# The critical ingestion path SLO is <100ms P99.
+
+groups:
+  - name: performance-regression
+    rules:
+      - alert: WebhookIngestionP99High
+        expr: histogram_quantile(0.99, sum(rate(webhook_ingestion_duration_milliseconds_bucket[5m])) by (le)) > 100
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Webhook ingestion P99 exceeds 100ms SLO"
+          description: "Ingestion P99 latency is {{ $value }}ms, breaching the <100ms critical-path SLO. Check webhook-delivery-service resource usage and queue saturation."
+
+      - alert: WebhookIngestionP95Elevated
+        expr: histogram_quantile(0.95, sum(rate(webhook_ingestion_duration_milliseconds_bucket[5m])) by (le)) > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook ingestion P95 latency elevated"
+          description: "Ingestion P95 latency is {{ $value }}ms. Trending toward the 100ms SLO; investigate before it breaches."
+
+      - alert: WebhookDeliveryP99High
+        expr: histogram_quantile(0.99, sum(rate(webhook_delivery_duration_seconds_bucket[5m])) by (le, status)) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook delivery P99 duration exceeds 1s"
+          description: "Delivery attempt P99 duration is {{ $value }}s for status {{ $labels.status }}. Downstream subscribers may be slow or unreachable."
+
+      - alert: WebhookQueueBacklog
+        expr: webhook_queue_size_current > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook delivery queue backlog"
+          description: "The delivery queue has {{ $value }} pending jobs. Ingestion keeps accepting work; delivery is falling behind. Scale workers or investigate downstream failures."
+
+      - alert: WebhookFailureRateHigh
+        expr: |
+          sum(rate(webhook_delivery_attempts_total{status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(webhook_delivery_attempts_total[5m])), 1) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook delivery failure rate above 10%"
+          description: "{{ $value | humanizePercentage }} of delivery attempts are failing (5xx). Check downstream subscriber endpoints and delivery retry configuration."
